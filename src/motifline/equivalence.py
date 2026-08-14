@@ -25,23 +25,39 @@ HIT_RATIO_BAND = (0.8, 1.25)
 
 
 def compare_attr(new_dir, old_attr_npy, old_regions_bed, n, out_json) -> dict:
+    """Level-1: the new attributions against the archived ones, row by row.
+
+    ``n`` is the head-slice length; a full-scale run passes None, which compares
+    every row the new run produced (and still requires the archive to have at
+    least that many, so a short new run cannot pass by comparing a prefix to
+    itself).
+    """
     new_dir = Path(new_dir)
-    A = np.load(new_dir / "attr.npy").astype(np.float64)
-    B = np.asarray(np.load(old_attr_npy, mmap_mode="r")[:n], dtype=np.float64)
+    A = np.load(new_dir / "attr.npy", mmap_mode="r")
+    if n is None:
+        n = len(A)
+    B = np.load(old_attr_npy, mmap_mode="r")[:n]
     ra = pd.read_csv(new_dir / "regions.bed", sep="\t", header=None).iloc[:, :3]
     rb = pd.read_csv(old_regions_bed, sep="\t", header=None).iloc[:n, :3]
     aligned = bool(len(ra) == n == len(A) == len(B)
                    and ra.reset_index(drop=True).astype(str).equals(
                        rb.reset_index(drop=True).astype(str)))
-    fa, fb = A.reshape(len(A), -1), B.reshape(len(B), -1)
-    m = min(len(fa), len(fb))
-    rows_r = [float(np.corrcoef(fa[i], fb[i])[0, 1]) for i in range(m)]
-    diff = np.abs(fa[:m] - fb[:m])
+    m = min(len(A), len(B))
+    # Row-at-a-time: the full-scale matrices are 33917x4x2114 float32 (1.1 GiB each)
+    # and a float64 copy of both plus their difference would be ~9 GiB.
+    rows_r, max_abs, bitwise = [], 0.0, 0
+    for i in range(m):
+        x = np.asarray(A[i], dtype=np.float64).ravel()
+        y = np.asarray(B[i], dtype=np.float64).ravel()
+        rows_r.append(float(np.corrcoef(x, y)[0, 1]))
+        d = float(np.abs(x - y).max())
+        max_abs = max(max_abs, d)
+        bitwise += int(d == 0)
     report = {
         "n": int(m),
         "regions_aligned": aligned,
-        "bitwise_equal_rows": int((diff.max(axis=1) == 0).sum()),
-        "max_abs_diff": float(diff.max()) if m else float("nan"),
+        "bitwise_equal_rows": int(bitwise),
+        "max_abs_diff": float(max_abs) if m else float("nan"),
         "min_row_pearson": float(min(rows_r)) if rows_r else float("nan"),
         "mean_row_pearson": float(np.mean(rows_r)) if rows_r else float("nan"),
         "row_pearson_gate": ROW_PEARSON_GATE,

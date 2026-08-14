@@ -9,9 +9,10 @@ random_state pinned) and the same central crop, so its rows are directly compara
 the archived interpret_ag_par_hyp/attr.npy prefix.
 
 Dropped relative to the shard script: --two_sided (a control, not the canonical path),
---shuffle_input (a null control), --subsample, and the shard split -- this plan attributes
-a head-slice in one process. Kept: the resumable chunk checkpointing, because a kill in
-an hour-long AG run must not cost the whole run.
+--shuffle_input (a null control) and --subsample. Kept: the shard split (same linspace
+bounds) for full-scale runs, and the resumable chunk checkpointing inside each shard --
+AG runs for tens of hours, so a kill must cost at most one chunk. The two compose:
+shard i writes ``_chunks_<i>/`` and then ``attr_<i>.npy``/``ohe_<i>.npy``/``regions_<i>.bed``.
 
 stdlib + numpy/pandas/torch/pyfaidx + alphagenome-pytorch + chrombpnet only; this file must
 never import motiflex or motifline. Site paths arrive as --ag_src/--chrombpnet_src, never
@@ -43,11 +44,29 @@ def parse_args():
     ap.add_argument("--head", type=int, default=None, help="take only the first N peaks (slice runs)")
     ap.add_argument("--hypothetical", action="store_true",
                     help="REQUIRED; only hypothetical attributions are implemented on the AG path")
+    ap.add_argument("--n_shards", type=int, default=None,
+                    help="split the peak list into N contiguous shards (full-scale runs)")
+    ap.add_argument("--shard_i", type=int, default=None, help="index of the shard to compute, 0-based")
     a = ap.parse_args()
     if not a.hypothetical:
         ap.error("--hypothetical is required: the AG path only implements hypothetical "
                  "attributions, and actual-score output would be silently mixable with them")
+    if (a.shard_i is None) != (a.n_shards is None):
+        ap.error("--shard_i and --n_shards must be given together")
+    if a.n_shards is not None:
+        if a.head is not None:
+            ap.error("--head and --shard_i/--n_shards are mutually exclusive: a head-slice of a "
+                     "shard is neither the slice nor the shard, and the merged output would be "
+                     "silently short")
+        if not 0 <= a.shard_i < a.n_shards:
+            ap.error(f"--shard_i must be in [0, {a.n_shards})")
     return a
+
+
+def shard_bounds(n_rows, n_shards):
+    """Contiguous shard boundaries, verbatim from region_v3/k562/shap_shard.py:52-56."""
+    import numpy as np
+    return np.linspace(0, n_rows, n_shards + 1).astype(int)
 
 
 def crop_center(arr, w):                       # (N,4,L) -> (N,4,w)
@@ -80,6 +99,13 @@ def main():
     df = load_peaks(a.peaks, a.chrom_sizes, a.in_window)
     df = df.drop_duplicates(subset=["chr", "start", "summit"]).reset_index(drop=True)
     N = len(df)
+    suffix = ""
+    if a.n_shards is not None:
+        bounds = shard_bounds(N, a.n_shards)
+        lo, hi = int(bounds[a.shard_i]), int(bounds[a.shard_i + 1])
+        df = df.iloc[lo:hi].reset_index(drop=True)
+        suffix = f"_{a.shard_i}"
+        print(f"[shard {a.shard_i}/{a.n_shards}] rows [{lo}:{hi}] = {len(df)} peaks", flush=True)
     if a.head:
         df = df.iloc[: a.head].reset_index(drop=True)
     print(f"[attr_ag] {len(df)} peaks (of {N} in-bounds, head={a.head})", flush=True)
@@ -107,7 +133,9 @@ def main():
     # CHECKPOINTED: process in resumable chunks. A kill loses <= 1 chunk; restart skips finished chunks.
     n = len(df)
     n_chunks = (n + a.chunk - 1) // a.chunk
-    cdir = f"{a.out_dir}/_chunks"
+    # Chunk checkpoints live per shard: a shared _chunks/ would let shard 1's chunk 0 be
+    # mistaken for shard 0's and resume-skipped with the wrong rows.
+    cdir = f"{a.out_dir}/_chunks{suffix}"
     os.makedirs(cdir, exist_ok=True)
     for c in range(n_chunks):
         af, of = f"{cdir}/attr_{c}.npy", f"{cdir}/ohe_{c}.npy"
@@ -123,9 +151,9 @@ def main():
 
     attr = np.concatenate([np.load(f"{cdir}/attr_{c}.npy") for c in range(n_chunks)], 0)
     ohe = np.concatenate([np.load(f"{cdir}/ohe_{c}.npy") for c in range(n_chunks)], 0)
-    np.save(f"{a.out_dir}/attr.npy", attr.astype(np.float32))
-    np.save(f"{a.out_dir}/ohe.npy", ohe.astype(np.int8))
-    df.to_csv(f"{a.out_dir}/regions.bed", sep="\t", header=False, index=False)
+    np.save(f"{a.out_dir}/attr{suffix}.npy", attr.astype(np.float32))
+    np.save(f"{a.out_dir}/ohe{suffix}.npy", ohe.astype(np.int8))
+    df.to_csv(f"{a.out_dir}/regions{suffix}.bed", sep="\t", header=False, index=False)
     print(f"DONE attr={attr.shape} ohe={ohe.shape}", flush=True)
 
 

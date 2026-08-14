@@ -29,6 +29,39 @@ runs:
     chunk: 100
     old_attr: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/attr.npy
     old_regions: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/peaks.bed
+  # ---- full-scale canonical production: attributions recomputed in shards ----
+  # These are not bit-for-bit reproductions of the archive: they run the tools'
+  # official parameters (docs/PARAMS_AUDIT.md), so the archive comparisons below
+  # are consistency reports, not gates.
+  k562_cbp_full:
+    model: cbp
+    wo_bias: <KANT_ROOT>/new_experiment/region_v3/k562/model/chrombpnet_wo_bias.pt
+    peaks: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
+    head: null
+    n_shards: 4
+    rows: 33917
+    in_window: 2114
+    old_attr: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/attr.npy
+    old_regions: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
+    old_modisco: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
+    old_hits: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/finemo_hits/hits.tsv
+  k562_ag_full:
+    model: ag
+    weights: <KANT_ROOT>/data/alphagenome/model_fold_0.safetensors
+    ag_src: <KANT_ROOT>/models/alphagenome-pytorch-deeplift/src
+    peaks: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
+    track: 60
+    head: null
+    n_shards: 6          # ~5653 peaks/shard at ~7.2 s/peak = ~11 h/shard on one card
+    rows: 33917
+    in_window: 16384
+    crop: 2114
+    n_shuffles: 20
+    chunk: 100
+    old_attr: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/attr.npy
+    old_regions: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/peaks.bed
+    old_modisco: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/modisco.h5
+    old_hits: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/finemo_hits/hits.tsv
   # ---- adopted runs: archived attributions linked in, downstream recomputed ----
   k562_cbp_adopted:
     model: cbp

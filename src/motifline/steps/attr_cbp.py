@@ -5,6 +5,10 @@ Line-for-line the math of region_v3/k562/shap_shard.py, single-process:
 same model construction, get_seq, masks and _deep_lift_shap call, so its
 output is directly comparable to the archived attr.npy. stdlib+numpy+torch+
 chrombpnet only -- this file must never import motiflex or motifline.
+
+Full-scale runs shard the peak list (--shard_i/--n_shards, same linspace bounds
+as the archive) and write ``attr_<i>.npy``/``ohe_<i>.npy``/``regions_<i>.bed``;
+``motifline.merge_shards`` concatenates them back in shard order.
 """
 import argparse
 import os
@@ -25,7 +29,31 @@ def parse_args():
     ap.add_argument("--in_window", type=int, default=2114)
     ap.add_argument("--random_state", type=int, default=42)
     ap.add_argument("--head", type=int, default=None, help="take only the first N peaks (slice runs)")
-    return ap.parse_args()
+    ap.add_argument("--n_shards", type=int, default=None,
+                    help="split the peak list into N contiguous shards (full-scale runs)")
+    ap.add_argument("--shard_i", type=int, default=None, help="index of the shard to compute, 0-based")
+    a = ap.parse_args()
+    if (a.shard_i is None) != (a.n_shards is None):
+        ap.error("--shard_i and --n_shards must be given together")
+    if a.n_shards is not None:
+        if a.head is not None:
+            ap.error("--head and --shard_i/--n_shards are mutually exclusive: a head-slice of a "
+                     "shard is neither the slice nor the shard, and the merged output would be "
+                     "silently short")
+        if not 0 <= a.shard_i < a.n_shards:
+            ap.error(f"--shard_i must be in [0, {a.n_shards})")
+    return a
+
+
+def shard_bounds(n_rows, n_shards):
+    """Contiguous shard boundaries, verbatim from region_v3/k562/shap_shard.py:52-56.
+
+    ``np.linspace(0, N, n_shards+1).astype(int)`` is what produced the archived
+    shards, so keeping it (rather than a ceil-divide that looks equivalent) keeps
+    shard i covering exactly the rows it covered then.
+    """
+    import numpy as np
+    return np.linspace(0, n_rows, n_shards + 1).astype(int)
 
 
 def normalize_peaks_bed(peaks_path, out_dir):
@@ -81,6 +109,16 @@ def main():
 
     regions_df = load_region_df(normalize_peaks_bed(a.peaks, a.out_dir),
                                 chrom_sizes=a.chrom_sizes)
+    suffix = ""
+    if a.n_shards is not None:
+        # Shard BEFORE the N-base masks, exactly as shap_shard.py did: the masks drop
+        # different rows in different shards, so slicing after them would make the shard
+        # bounds depend on sequence content and the concatenation no longer be the whole.
+        bounds = shard_bounds(len(regions_df), a.n_shards)
+        lo, hi = int(bounds[a.shard_i]), int(bounds[a.shard_i + 1])
+        regions_df = regions_df.iloc[lo:hi].reset_index(drop=True)
+        suffix = f"_{a.shard_i}"
+        print(f"[shard {a.shard_i}/{a.n_shards}] rows [{lo}:{hi}] = {len(regions_df)} peaks", flush=True)
     if a.head:
         regions_df = regions_df.iloc[: a.head].reset_index(drop=True)
     seq = get_seq(regions_df, pyfaidx.Fasta(a.fasta), a.in_window)
@@ -99,9 +137,10 @@ def main():
                            args=None, warning_threshold=1e8, device="cuda",
                            hypothetical=a.hypothetical, random_state=a.random_state)
     attr = attr.cpu().numpy() if isinstance(attr, torch.Tensor) else np.asarray(attr)
-    np.save(os.path.join(a.out_dir, "attr.npy"), attr.astype(np.float32))
-    np.save(os.path.join(a.out_dir, "ohe.npy"), seq.cpu().numpy().astype(np.int8))
-    regions_df.to_csv(os.path.join(a.out_dir, "regions.bed"), sep="\t", header=False, index=False)
+    np.save(os.path.join(a.out_dir, f"attr{suffix}.npy"), attr.astype(np.float32))
+    np.save(os.path.join(a.out_dir, f"ohe{suffix}.npy"), seq.cpu().numpy().astype(np.int8))
+    regions_df.to_csv(os.path.join(a.out_dir, f"regions{suffix}.bed"),
+                      sep="\t", header=False, index=False)
     print(f"DONE attr={attr.shape}", flush=True)
 
 
