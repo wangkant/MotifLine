@@ -1,0 +1,19 @@
+kant: <KANT_ROOT>
+envs:
+  compute: <KANT_ROOT>/envs/chrombpnet_local
+compute_site_packages: <KANT_ROOT>/envs/chrombpnet_local/lib/python3.10/site-packages
+chrombpnet_src: <KANT_ROOT>/models/chrombpnet-pytorch
+genome:
+  fasta: <KANT_ROOT>/data/genome/hg38.fa
+  chrom_sizes: <KANT_ROOT>/data/genome/hg38.chrom.sizes
+runs:
+  k562_cbp_slice500:
+    model: cbp
+    wo_bias: <KANT_ROOT>/new_experiment/region_v3/k562/model/chrombpnet_wo_bias.pt
+    peaks: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
+    head: 500
+    in_window: 2114
+    old_attr: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/attr.npy
+    old_regions: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
+modisco: {max_seqlets: 1000000, window: 500}
+finemo: {alpha: 0.7, threshold: 0.3, batch: 1000, mode: pp}
