@@ -56,4 +56,7 @@ attr = deep_lift_shap(wrapper, X, target=0, batch_size=1,
                       device="cuda", random_state=a.random_state, verbose=True)
 np.save(f"{a.out_dir}/attr.npy", attr.cpu().numpy().astype(np.float32))
 np.save(f"{a.out_dir}/ohe.npy", X.numpy().astype(np.int8))
-df.to_csv(f"{a.out_dir}/regions.bed", sep="\t", header=False, index=False)
+# narrowPeak, as the ChromBPNet path writes it: finemo reads the summit from column 10
+with open(f"{a.out_dir}/regions.bed", "w") as fh:
+    for r in df.itertuples(index=False):
+        fh.write("\t".join(map(str, [r.chr, r.start, r.end, *["."] * 6, r.summit, True])) + "\n")
