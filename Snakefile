@@ -12,13 +12,22 @@ wildcard_constraints:
     run="[^/]+"
 
 
+def width(run):
+    # what the attribution step stores: ChromBPNet's 2114 bp input, AlphaGenome's 2048
+    return 2048 if RUNS[run]["model"] == "ag" else 2114
+
+
 def attr_cmd(w):
     r = RUNS[w.run]
     a = config["attribution"]
+    common = (f"--peaks {r['peaks']} --fasta {G['fasta']} --chrom_sizes {G['chrom_sizes']} "
+              f"--out_dir results/{w.run}/attr "
+              f"--n_shuffles {a['n_shuffles']} --random_state {a['random_state']}")
+    if r["model"] == "ag":
+        return (f"{PY} {S}/attr_ag.py --ag_src {r['ag_src']} --weights {r['weights']} "
+                f"--track {r['track']} {common}")
     return (f"{PY} {S}/attr_cbp.py "
-            f"--wo_bias {r['wo_bias']} --peaks {r['peaks']} --fasta {G['fasta']} "
-            f"--chrom_sizes {G['chrom_sizes']} --out_dir results/{w.run}/attr "
-            f"--n_shuffles {a['n_shuffles']} --random_state {a['random_state']}")
+            f"--wo_bias {r['wo_bias']} {common}")
 
 
 rule all:
@@ -50,9 +59,10 @@ rule discover:
 rule extract_regions:
     input: rules.attribute.output
     output: "results/{run}/finemo_regions/regions.npz"
+    params: w=lambda w: width(w.run)
     shell:
         "{ENV}/bin/finemo extract-regions-modisco-fmt -s {input[1]} -a {input[0]} "
-        "-p {input[2]} -o {output} -w 2114"
+        "-p {input[2]} -o {output} -w {params.w}"
 
 
 rule call_hits:

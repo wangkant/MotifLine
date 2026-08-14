@@ -1,0 +1,6 @@
+motifline is MIT licensed (see LICENSE), with one exception.
+
+scripts/ag_deeplift.py derives from, and modifies, Ruchir Rastogi's
+examples/notebooks/deeplift.ipynb (rastogiruchir/alphagenome-pytorch, branch
+deeplift-support), which is licensed under the Apache License 2.0. A copy of that
+licence is at licenses/Apache-2.0.txt, and the file's own header says how it was changed.

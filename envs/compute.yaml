@@ -14,3 +14,7 @@ dependencies:
       - tangermeme==1.0.4
       - modisco-lite==2.4.0
       - finemo @ git+https://github.com/austintwang/finemo_gpu.git@5c6f521c773f61f50307ff7cc59682073a56a65a
+      # alphagenome-pytorch
+      - pyBigWig==0.3.25
+      - tqdm==4.67.3
+      - safetensors==0.7.0
