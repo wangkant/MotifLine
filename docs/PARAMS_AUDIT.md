@@ -179,3 +179,17 @@ The K562-AG `exact_jaccard` of 0.226 against a `tolerant_jaccard` of 0.586 is a
 archive best of all four (28/28 patterns, mean cosine 0.978), but `call-hits`
 re-derives each motif's start/end by trimming the CWM at `-t 0.3`, so a slightly
 different CWM shifts every hit of that motif by a base or two.
+
+## 10. Orchestration parameters added in batch 3 (full-scale production)
+
+None of these enter a tool's math; they are listed because a merged matrix and a
+shared GPU are exactly the failures that look like a result.
+
+| Parameter | Value | Source / reason |
+|---|---|---|
+| shard bounds | `np.linspace(0, N, n_shards+1).astype(int)` | Verbatim `region_v3/k562/shap_shard.py:52-56`. Shards are cut **before** the N-base/all-zero masks, as in the archive: masking first would make the cut points depend on sequence content. |
+| `n_shards` (`k562_cbp_full`) | 4 | Plan value. 33917 → 8479/8479/8479/8480 rows. Attribution is per-row, so the split cannot change a number. |
+| `n_shards` (`k562_ag_full`) | 6 | Plan ceiling. ~5653 rows/shard; measured AG rate ≈7.2 s/peak/card ⇒ ≈11 h/shard. |
+| `--chunk` (AG) | 100 | Checkpoint granularity inside a shard (unchanged from §5). Chunk files live in `_chunks_<i>/` per shard so shard 1's chunk 0 can never be resume-skipped as shard 0's. |
+| GPU selection | fully-free cards only, one always held back, pinned by UUID, claimed through a lock directory | Project standing rule. nvidia-smi alone is not enough with concurrent shards: both read the same idle card before either allocates. |
+| `-j` / `--resources gpu` | 2 (batch 3, K562-CBP) | Not a preference: 3 cards were fully free at launch (2026-08-14 07:29) and one is always left free. Others' jobs held GPUs 0,1,2,4,6,7,8. |
