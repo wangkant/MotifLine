@@ -64,7 +64,115 @@ patterns**: old `pattern_18` ↔ new `pattern_19` match at cosine 1.0000 and old
 1038 old out of 756278 (0.02%). A ~1e-7 attribution difference is enough to move
 seqlets between two patterns that were already almost the same pattern.
 
-## Batch 4 (2026-08-14): external-lexicon routes
+## Batch 4 (2026-08-14): finemo 0.30 vs 0.41, and the external-lexicon routes
+
+### `k562_cbp_full/hits_v041` — the same inputs, called by finemo 0.41
+
+Same `finemo_regions/regions.npz` (extracted by 0.30) and same
+`modisco/modisco.h5`, same `-M pp -t 0.3 -l 0.7 -b 2000`. **This table is data
+for a version decision, not a verdict; nothing here picks a version.**
+
+| | 0.30 (`hits/`) | 0.41 (`hits_v041/`) |
+|---|---|---|
+| binary | `envs/chrombpnet_local/bin/finemo` | `envs/mmv_verify/bin/finemo` |
+| torch | 2.3.1+cu121 | 2.13.0+cu130 |
+| device **on this node** | GPU `GPU-B` | **CPU** — driver 555.42.06 is older than cu130 needs, torch reports no GPU |
+| wall | 12:44:39 → 12:46:45 = **2 min 06 s** | 14:44:06 → 15:58:47 = **74 min 41 s** |
+| hits | 756278 | 756232 |
+| motifs | 30 | 30 |
+
+**The runtimes are not a version comparison.** 0.41 could not reach a GPU here,
+so 74 min vs 2 min is CPU vs GPU. Whether 0.41 is faster or slower than 0.30 on
+equal hardware is **not measured** and cannot be read off this row.
+
+Agreement (`equivalence/hits_v041_report.json`, joined on `motif_name` — both
+sides scored the identical modisco.h5, so the names denote the same motifs):
+
+```
+ratio_total_new_over_old  0.999939     exact_jaccard     0.999020
+n_motifs 30 / 30                       tolerant_jaccard  0.999063  (tol 2bp)
+flags                     0            within_tolerance  true
+```
+
+Keyed on `(chr,start,end,motif_name,strand,peak_id)` — the finest key the file
+supports, and unique on both sides — 755859 hits are shared, **373 are 0.41-only
+and 419 are 0.30-only** (Jaccard 0.998953). On the shared hits the scores agree
+to the level of a different BLAS:
+
+| column | max abs diff | median abs diff | pearson |
+|---|---|---|---|
+| `hit_similarity` | 4.649e-04 | 6.110e-05 | 0.999998739 |
+| `hit_importance` | 2.175e-04 | 1.489e-06 | 0.999999996 |
+| `hit_coefficient` | 7.144e+01 | 9.949e-04 | 0.999930344 |
+
+Per-motif counts, all 30 motifs, ratio 0.41/0.30 (largest first):
+
+| motif | 0.41 | 0.30 | 0.41/0.30 | 0.30/0.41 |
+|---|---|---|---|---|
+| neg_patterns.pattern_0 | 320513 | 320526 | 0.99996 | 1.00004 |
+| neg_patterns.pattern_1 | 73215 | 73225 | 0.99986 | 1.00014 |
+| pos_patterns.pattern_2 | 63124 | 63126 | 0.99997 | 1.00003 |
+| pos_patterns.pattern_1 | 43387 | 43384 | 1.00007 | 0.99993 |
+| pos_patterns.pattern_4 | 37929 | 37935 | 0.99984 | 1.00016 |
+| neg_patterns.pattern_2 | 30912 | 30910 | 1.00006 | 0.99994 |
+| neg_patterns.pattern_4 | 27434 | 27440 | 0.99978 | 1.00022 |
+| pos_patterns.pattern_10 | 24027 | 24039 | 0.99950 | 1.00050 |
+| neg_patterns.pattern_6 | 23732 | 23728 | 1.00017 | 0.99983 |
+| pos_patterns.pattern_7 | 22372 | 22371 | 1.00004 | 0.99996 |
+| pos_patterns.pattern_14 | 19983 | 19995 | 0.99940 | 1.00060 |
+| pos_patterns.pattern_6 | 17821 | 17821 | 1.00000 | 1.00000 |
+| pos_patterns.pattern_0 | 12576 | 12578 | 0.99984 | 1.00016 |
+| pos_patterns.pattern_3 | 11839 | 11833 | 1.00051 | 0.99949 |
+| pos_patterns.pattern_5 | 5191 | 5192 | 0.99981 | 1.00019 |
+| neg_patterns.pattern_8 | 3970 | 3969 | 1.00025 | 0.99975 |
+| pos_patterns.pattern_11 | 3808 | 3810 | 0.99948 | 1.00053 |
+| pos_patterns.pattern_8 | 3677 | 3677 | 1.00000 | 1.00000 |
+| pos_patterns.pattern_12 | 2603 | 2603 | 1.00000 | 1.00000 |
+| pos_patterns.pattern_15 | 2251 | 2250 | 1.00044 | 0.99956 |
+| neg_patterns.pattern_5 | 1539 | 1537 | 1.00130 | 0.99870 |
+| pos_patterns.pattern_9 | 1122 | 1122 | 1.00000 | 1.00000 |
+| pos_patterns.pattern_16 | 931 | 932 | 0.99893 | 1.00107 |
+| pos_patterns.pattern_19 | 821 | 820 | 1.00122 | 0.99878 |
+| neg_patterns.pattern_7 | 584 | 583 | 1.00172 | 0.99829 |
+| pos_patterns.pattern_17 | 487 | 488 | 0.99795 | 1.00205 |
+| neg_patterns.pattern_3 | 188 | 188 | 1.00000 | 1.00000 |
+| neg_patterns.pattern_9 | 122 | 122 | 1.00000 | 1.00000 |
+| pos_patterns.pattern_18 | 49 | 49 | 1.00000 | 1.00000 |
+| pos_patterns.pattern_13 | 25 | 25 | 1.00000 | 1.00000 |
+| **total** | **756232** | **756278** | 0.99994 | 1.00006 |
+
+Every ratio is in [0.998, 1.002]; the pre-registered band is [0.8, 1.25].
+
+#### `hitcaller.py` 0.30 vs 0.41 — what actually differs
+
+Compared as normalized ASTs (docstrings, comments and annotations stripped):
+243 → 249 statement lines. **No algorithmic change in `hitcaller.py`.**
+
+| # | Change | Kind |
+|---|---|---|
+| 1 | `l,n,b,m,w` → `L,N,B,M,W`; `cwms`→`cwms_tensor` etc. so the numpy arg and its tensor stop sharing a name | surface |
+| 2 | `BatchLoaderBase` becomes an `ABC` with `@abstractmethod load_batch` (was `raise NotImplementedError`) | surface |
+| 3 | `fit_contribs` signature gains explicit defaults (`step_size_max=3.0`, `batch_size=2000`, …) — the same values `main.py` already passed | surface |
+| 4 | `load_batch(int(load_start), int(load_end))` casts | surface |
+| 5 | jaxtyping / typing imports | surface |
+
+The two changes that could move a number are **not** in `hitcaller.py`:
+
+| # | Where | Change | Effect |
+|---|---|---|---|
+| 6 | `data_io.load_modisco_motifs` | reverse-strand trim was `trim_motif(cwm_rev, t)`, is now `(len-end_fwd, len-start_fwd)` | **algorithmic in form, inert in fact**: `trim_motif` scans `sum(abs(cwm),axis=0)` for first/last position ≥ `t·max`, and that profile for `cwm[::-1,::-1]` is the forward profile reversed. Checked empirically: `motif_data.tsv` trim windows (60 rows = 30 motifs × 2 strands) are **identical** between the two runs. |
+| 7 | `data_io._motif_name_sort_key` | `pattern_N` → `(N,)`, else `(-1,name)`; now tries `_`, then `#`, then `(1,name)` | same order for MoDISco's `pattern_N` names; only reaches new branches for lexicons named otherwise |
+| 8 | `data_io.write_hits` | `data_unique` now filters null `chr` first | affects `hits_unique.tsv`/`hits.bed` only, not `hits.tsv` |
+| 9 | `main.call_hits` | new `-T/--cwm-trim-thresholds`, `-R/--cwm-trim-coords` (unset here); explicit invalid-`mode` error; `torch.device(device)` wrap | inert at these settings |
+
+So the ~0.1% of hits that differ is **not attributable to a code change we can
+point at**: identical trim windows, identical motif set, score differences at
+1e-4 on shared hits. It has the shape of floating-point non-determinism in the
+proximal-gradient optimizer's convergence test — which on this node is also a
+CPU-vs-GPU difference, since the two runs did not use the same backend.
+`hits_v041/` is a leaf: nothing downstream reads it.
+
+### External-lexicon routes
 
 ### `k562_cbp_cl1_adopted` — gw and mmv routes vs the region_v4 archive
 
