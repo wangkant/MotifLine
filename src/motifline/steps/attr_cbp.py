@@ -28,6 +28,35 @@ def parse_args():
     return ap.parse_args()
 
 
+def normalize_peaks_bed(peaks_path, out_dir):
+    """Hand ``load_region_df`` the 10-column narrowPeak form it expects.
+
+    The archived region_v3 ``peaks.bed`` is chrombpnet's *output* regions bed:
+    10 narrowPeak columns plus the ``is_peak`` column that ``load_region_df``
+    itself appends (``data_utils.py:238``), so feeding it back verbatim gives
+    12 columns against 11 names and dies. Dropping that trailing column and
+    letting ``load_region_df`` re-add ``is_peak=True`` is identity, which is
+    only true while every value is True -- anything else is refused rather
+    than silently coerced. Files with <=10 columns are passed through
+    untouched. Row order and row count are never changed here.
+    """
+    with open(peaks_path) as fh:
+        lines = [ln.rstrip("\n") for ln in fh if ln.strip()]
+    widths = {ln.count("\t") + 1 for ln in lines}
+    if widths and max(widths) <= 10:
+        return peaks_path
+    if widths != {11}:
+        raise ValueError(f"{peaks_path}: expected 10 or 11 columns, saw {sorted(widths)}")
+    bad = {ln.rsplit("\t", 1)[1] for ln in lines} - {"True"}
+    if bad:
+        raise ValueError(f"{peaks_path}: 11th column must be is_peak=True, saw {sorted(bad)}")
+    os.makedirs(out_dir, exist_ok=True)
+    dst = os.path.join(out_dir, "input_peaks_10col.bed")
+    with open(dst, "w") as fh:
+        fh.write("".join(ln.rsplit("\t", 1)[0] + "\n" for ln in lines))
+    return dst
+
+
 def main():
     a = parse_args()
     sys.path.insert(0, a.chrombpnet_src)
@@ -50,7 +79,8 @@ def main():
         p.requires_grad = False
     model = CountWrapper(model) if a.task == "counts" else ProfileWrapper(model)
 
-    regions_df = load_region_df(a.peaks, chrom_sizes=a.chrom_sizes)
+    regions_df = load_region_df(normalize_peaks_bed(a.peaks, a.out_dir),
+                                chrom_sizes=a.chrom_sizes)
     if a.head:
         regions_df = regions_df.iloc[: a.head].reset_index(drop=True)
     seq = get_seq(regions_df, pyfaidx.Fasta(a.fasta), a.in_window)
