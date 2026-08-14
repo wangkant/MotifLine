@@ -10,6 +10,7 @@ configfile: "config/default.yaml"
 from motifline import contracts, guards
 from motifline.gpu import env_sees_cuda, free_gpu_uuids, gpu_lease
 from motifline.lexicons import attr_width, lexicon_batch, lexicon_path
+from motifline.runs import active_runs, cancelled_runs
 from motifline.versions import dist_info_version
 
 ENV = config["envs"]["compute"]
@@ -97,6 +98,11 @@ SINGLE = sorted(k for k in COMPUTED if not config["runs"][k].get("n_shards"))
 # for a report a run has no archive for is an unmatched target, not a KeyError
 # raised halfway through the DAG.
 ARCHIVE_COMPARED = sorted(k for k, v in config["runs"].items() if v.get("old_modisco"))
+# A cancelled run keeps every rule it always had -- it stays resumable by explicit
+# target -- but drops out of the default target list, so a bare `snakemake` cannot
+# restart work somebody stopped on purpose. See motifline/src/motifline/runs.py and
+# the run's own CANCELLED.md (config: cancelled_note).
+CANCELLED = cancelled_runs(config)
 LEXICON_RUNS = sorted(k for k, v in config["runs"].items() if v.get("lexicon_hits"))
 CROSS_VERSION = sorted(k for k, v in config["runs"].items() if v.get("cross_version_hits"))
 LEXICON_ROUTES = sorted((config.get("lexicons") or {}).get("routes") or {})
@@ -117,15 +123,18 @@ def shard_outputs(w):
 rule all:
     input:
         expand("results/{run}/equivalence/attr_report.json",
-               run=["k562_cbp_slice500", "k562_ag_slice200", "k562_cbp_full"]),
-        expand("results/{run}/hits/hits.tsv", run=["k562_cbp_slice500"]),
+               run=active_runs(config, ["k562_cbp_slice500", "k562_ag_slice200",
+                                        "k562_cbp_full"])),
+        expand("results/{run}/hits/hits.tsv",
+               run=active_runs(config, ["k562_cbp_slice500"])),
         expand("results/{run}/equivalence/{report}_report.json",
-               run=ARCHIVE_COMPARED, report=["modisco", "hits"]),
+               run=active_runs(config, ARCHIVE_COMPARED), report=["modisco", "hits"]),
         # finemo 0.30 vs 0.41 on one and the same regions.npz + modisco.h5
-        expand("results/{run}/equivalence/hits_v041_report.json", run=CROSS_VERSION),
+        expand("results/{run}/equivalence/hits_v041_report.json",
+               run=active_runs(config, CROSS_VERSION)),
         # external-lexicon routes vs their archived per-context hits
         expand("results/{run}/equivalence/hits_lexicon_{route}_report.json",
-               run=LEXICON_RUNS, route=LEXICON_ROUTES)
+               run=active_runs(config, LEXICON_RUNS), route=LEXICON_ROUTES)
 
 rule import_attr:
     """Adopt archived attributions: symlink attr/ohe, normalize peaks -> regions.bed."""

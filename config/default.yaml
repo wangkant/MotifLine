@@ -51,7 +51,17 @@ runs:
     old_regions: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
     old_modisco: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
     old_hits: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/finemo_hits/hits.tsv
+  # CANCELLED 2026-08-15 by the user: the AG code path is already proven by the
+  # slice-200 level-1 report (r >= 0.9999999994) and AG's downstream by
+  # k562_ag_adopted, so a second full-scale AG attribution buys no verification.
+  # The definition stays so the five started shards remain resumable by explicit
+  # target; `cancelled: true` only removes it from `rule all`. Reason, per-shard
+  # checkpoint state and the exact resume commands:
+  #   results/k562_ag_full/CANCELLED.md
+  # The canonical AG side of this project is `k562_ag_adopted`.
   k562_ag_full:
+    cancelled: true
+    cancelled_note: results/k562_ag_full/CANCELLED.md
     model: ag
     weights: <KANT_ROOT>/data/alphagenome/model_fold_0.safetensors
     ag_src: <KANT_ROOT>/models/alphagenome-pytorch-deeplift/src

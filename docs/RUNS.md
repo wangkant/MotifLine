@@ -223,9 +223,30 @@ be: unlike the adopted `discover → call_hits` chains, nothing here is
 recomputed except the hit calling itself. Same attributions (symlinked), same
 lexicon file, same `-M/-t/-l/-b`, same finemo 0.30.
 
-### `k562_ag_full` — AlphaGenome, 33917 peaks (RUNNING, batch 5 collects)
+### `k562_ag_full` — AlphaGenome, 33917 peaks (**CANCELLED 2026-08-15**)
 
-5 of 6 shards launched, one card left free; see
+**Stopped on purpose at 63.4% of the attribution, by the user's decision.** Not
+a failure, and not a result: nothing downstream of it was ever computed, so
+nothing is retracted. The canonical AG side of this project is
+`k562_ag_adopted`. Full record, per-shard checkpoint state and the exact resume
+commands: `results/k562_ag_full/CANCELLED.md` (that tree is gitignored; this
+section is the in-repo copy of the decision).
+
+Grounds, both already on disk: the AG *code path* is proven by
+`k562_ag_slice200`'s level-1 report (`min_row_pearson 0.9999999994123285`,
+`results/k562_ag_slice200/equivalence/attr_report.json`), and the AG
+*downstream* by `k562_ag_adopted` running all 33917 AG rows through
+discover/extract/call_hits (§9 of `PARAMS_AUDIT.md`). Attribution is per-row, so
+rows 201..33917 exercise no further code path.
+
+State kept, resumable: 215 of 342 chunks on disk (21500/33917 peaks, 868 MB),
+shard 5 never launched. All five shard `run_status.json` files read
+`CRASHED / "body exited -15"` — the SIGTERM — and are **left as they are**;
+`merge_shards` refuses over a non-SUCCESS shard, which is the point. `rule all`
+no longer asks for this run (`config: cancelled: true`,
+`src/motifline/runs.py`); every explicit target still resolves.
+
+5 of 6 shards had been launched, one card left free; see
 `results/k562_ag_full/LAUNCH.md` for PIDs, cards, logs, the first-chunk
 timestamps and the verified kill/resume evidence.
 
