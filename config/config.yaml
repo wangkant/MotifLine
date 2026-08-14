@@ -1,0 +1,24 @@
+envs:
+  compute: /path/to/envs/compute
+genome:
+  fasta: /path/to/hg38.fa
+  chrom_sizes: /path/to/hg38.chrom.sizes
+
+attribution:
+  n_shuffles: 20
+  random_state: 42
+
+runs:
+  k562_cbp:
+    model: cbp
+    wo_bias: /path/to/k562_chrombpnet_nobias.h5
+    peaks: config/peaks/k562_allpeaks_33917.bed
+
+modisco:
+  max_seqlets: 1000000
+  window: 400
+finemo:
+  mode: pp
+  threshold: 0.3      # --cwm-trim-threshold
+  alpha: 0.7          # --global-lambda
+  batch: 2000
