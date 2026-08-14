@@ -29,5 +29,52 @@ runs:
     chunk: 100
     old_attr: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/attr.npy
     old_regions: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/peaks.bed
-modisco: {max_seqlets: 1000000, window: 500}
-finemo: {alpha: 0.7, threshold: 0.3, batch: 1000, mode: pp}
+  # ---- adopted runs: archived attributions linked in, downstream recomputed ----
+  k562_cbp_adopted:
+    model: cbp
+    adopt_from: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp
+    adopt_peaks: peaks.bed          # already the 11-col load_region_df form
+    rows: 33917
+    in_window: 2114
+    old_modisco: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
+    old_hits: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/finemo_hits/hits.tsv
+  k562_ag_adopted:
+    model: ag
+    adopt_from: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp
+    adopt_peaks: peaks.bed          # 4-col chr/start/end/summit -> expanded to narrowPeak form
+    rows: 33917
+    in_window: 16384
+    crop: 2114
+    old_modisco: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/modisco.h5
+    old_hits: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/finemo_hits/hits.tsv
+  gm12878_cbp_adopted:
+    model: cbp
+    adopt_from: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_cbp_par_hyp
+    adopt_peaks: peaks.bed
+    rows: 21084
+    in_window: 2114
+    old_modisco: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_cbp_par_hyp/modisco.h5
+    old_hits: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_cbp_par_hyp/finemo_hits/hits.tsv
+  gm12878_ag_adopted:
+    model: ag
+    adopt_from: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_ag_par_hyp
+    adopt_peaks: peaks.bed
+    rows: 21085
+    in_window: 16384
+    crop: 2114
+    old_modisco: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_ag_par_hyp/modisco.h5
+    old_hits: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_ag_par_hyp/finemo_hits/hits.tsv
+
+# Canonical parameters. Every value here is the tool's own official default
+# (`--help` in envs/chrombpnet_local) unless the note says why it cannot be.
+# Full provenance, historical values and deviation reasons: docs/PARAMS_AUDIT.md.
+modisco:
+  max_seqlets: 1000000   # -n is REQUIRED by the CLI: no official default exists to adopt
+  window: 400            # official default (was 500 in region_v3 / the vertical slice)
+  # -l 2, -z 20, -t 30, -f 5, -g 10, -j 0 left unset = official defaults
+finemo:
+  mode: pp               # official default
+  threshold: 0.3         # -t, official default
+  alpha: 0.7             # -l/--global-lambda, official default
+  batch: 2000            # -b, official default (vertical slice ran 1000)
+  # -s 3.0, -i 0.08, -j 0.7, -c 5e-4, -S 10000 left unset = official defaults
