@@ -147,3 +147,35 @@ implemented in `src/motifline/equivalence.py`:
 | attr per-row Pearson (level 1 only, hard gate) | ≥ 0.999 |
 
 Out-of-band is a **flag with an attribution**, not a failure.
+
+## 9. Measured effect of the `-w 500 → 400` change (adopted runs, 2026-08-14)
+
+Numbers from `motifline/results/<run>/equivalence/{modisco,hits}_report.json`.
+Attributions are byte-identical to the archive in all four runs (they are the
+archive, symlinked), so **`modisco -w` is the only thing that changed** between
+the archived downstream and these.
+
+| run | pos new/old | neg new/old | mean CWM cos | min cos | #<0.85 | hits new/old | ratio | exact J | tol J | hit flags |
+|---|---|---|---|---|---|---|---|---|---|---|
+| k562_cbp_adopted | 20/22 | 10/11 | 0.9594 | 0.7018 | 4 | 756333/748010 | 1.011 | 0.738 | 0.822 | 14 |
+| k562_ag_adopted | 28/28 | 0/0 | 0.9780 | 0.8438 | 1 | 144717/151126 | 0.958 | 0.226 | 0.586 | 13 |
+| gm12878_cbp_adopted | 19/23 | 0/0 | 0.9595 | 0.5949 | 2 | 230992/236176 | 0.978 | 0.798 | 0.918 | 5 |
+| gm12878_ag_adopted | 33/34 | 0/0 | 0.9524 | 0.6141 | 5 | 153263/140278 | 1.093 | 0.662 | 0.731 | 18 |
+
+Reading: the **total** hit yield is stable (0.96–1.09× across all four) and the
+**high-rank motifs** are recovered with mean CWM cosine 0.95–0.98. What the
+narrower discovery window costs is the **tail**: the patterns that fall below
+the cosine floor and the ones whose counts move are consistently the
+highest-numbered (lowest-seqlet-count) ones — `pattern_17..21` in K562-CBP,
+`pattern_26..33` in GM12878-AG. A 400bp window around the peak centre admits
+fewer seqlets per region than a 500bp one, so rare motifs lose the support that
+kept them separable, and their seqlets are absorbed into neighbouring patterns.
+
+Level-2 pattern counts stay inside the ±2 tolerance for three of the four runs;
+`gm12878_cbp_adopted` (−4 pos) is the exception.
+
+The K562-AG `exact_jaccard` of 0.226 against a `tolerant_jaccard` of 0.586 is a
+**coordinate-offset**, not a motif-identity, effect: its lexicon matches the
+archive best of all four (28/28 patterns, mean cosine 0.978), but `call-hits`
+re-derives each motif's start/end by trimming the CWM at `-t 0.3`, so a slightly
+different CWM shifts every hit of that motif by a base or two.
