@@ -354,3 +354,11 @@ artifacts stay readable:
 * `results/k562_ag_slice200/attr/regions.bed` is the pre-fix 4-column form. Its
   level-1 report reads only columns 1–3, so it is unaffected; a rerun would now
   write the 11-column form every other stage expects.
+
+## 14. 用户最终裁定（2026-08-15，三项全部拍板）
+
+| 决定点 | 裁定 |
+|---|---|
+| finemo 版本 | **钉 0.30**（canonical 计算环境 `envs/chrombpnet_local`）。0.41 记录为数据兼容（§11：exact J 0.999、AST 无算法差），仅供 `cross_version_hits` 对照 stage 使用。版本 guard 继续按 params 记录值执行。 |
+| `modisco -n` | **维持 1000000**（§1 的 ⚠ 就此关闭）。库接口的 20000 不采用。 |
+| `k562_ag_full` | **永久关闭，不续跑**（此前"取消可续"升级为最终裁定）。AG 侧正典维持 `k562_ag_adopted`。 |
