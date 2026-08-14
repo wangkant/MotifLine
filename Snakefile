@@ -66,7 +66,7 @@ def attr_params(r):
 rule all:
     input:
         expand("results/{run}/equivalence/attr_report.json",
-               run=["k562_cbp_slice500", "k562_ag_slice500"]),
+               run=["k562_cbp_slice500", "k562_ag_slice200"]),
         expand("results/{run}/hits/hits.tsv", run=["k562_cbp_slice500"])
 
 rule attribute:

@@ -16,13 +16,13 @@ runs:
     in_window: 2114
     old_attr: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/attr.npy
     old_regions: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
-  k562_ag_slice500:
+  k562_ag_slice200:
     model: ag
     weights: <KANT_ROOT>/data/alphagenome/model_fold_0.safetensors
     ag_src: <KANT_ROOT>/models/alphagenome-pytorch-deeplift/src
     peaks: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
     track: 60
-    head: 500
+    head: 200
     in_window: 16384
     crop: 2114
     n_shuffles: 20
