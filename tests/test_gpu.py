@@ -56,3 +56,23 @@ def test_lease_reclaims_a_lock_whose_holder_is_gone(tmp_path):
     (tmp_path / "GPU-aaa").write_text("2147483646 0\n")     # pid that cannot be running
     with gpu_lease(tmp_path, leave_free=1, _query=fake_query(GPUQ, APPS_BBB)) as a:
         assert a == "GPU-aaa"
+
+
+def test_env_sees_cuda_probes_that_interpreter_not_this_one(tmp_path):
+    """A wheel built against a newer CUDA than the node's driver imports fine and
+    then runs on CPU; a stage that leases a card in that state squats it."""
+    from motifline.gpu import env_sees_cuda
+    yes = tmp_path / "yes.sh"
+    yes.write_text('#!/bin/sh\necho 1\n'); yes.chmod(0o755)
+    no = tmp_path / "no.sh"
+    no.write_text('#!/bin/sh\necho 0\n'); no.chmod(0o755)
+    boom = tmp_path / "boom.sh"
+    boom.write_text('#!/bin/sh\nexit 3\n'); boom.chmod(0o755)
+    noisy = tmp_path / "noisy.sh"          # torch prints its driver warning first
+    noisy.write_text('#!/bin/sh\necho "UserWarning: driver too old" >&2\necho 0\n')
+    noisy.chmod(0o755)
+    assert env_sees_cuda(yes) is True
+    assert env_sees_cuda(no) is False
+    assert env_sees_cuda(boom) is False
+    assert env_sees_cuda(noisy) is False
+    assert env_sees_cuda(tmp_path / "does_not_exist") is False

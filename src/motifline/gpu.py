@@ -30,6 +30,27 @@ def free_gpu_uuids(leave_free: int = 1, _query=None) -> list[str]:
     return free[: len(free) - leave_free]
 
 
+def env_sees_cuda(python_exe) -> bool:
+    """Whether torch in *that* interpreter can actually reach a GPU on this node.
+
+    Asked of the interpreter, never of this process: a torch wheel built against
+    a newer CUDA than the node's driver imports without error, warns, and then
+    runs on the CPU. A stage that leases a card in that state holds it for its
+    entire runtime without ever issuing a kernel — on a saturated node that is
+    indistinguishable from a hang for everything queued behind it, and it was
+    observed here (finemo 0.41 in envs/mmv_verify: torch 2.13.0+cu130 against
+    driver 555.42.06). Any failure to answer cleanly is read as "no GPU": the
+    safe direction is to run on the CPU, not to squat a card.
+    """
+    try:
+        r = subprocess.run([str(python_exe), "-c",
+                            "import torch; print(int(torch.cuda.is_available()))"],
+                           capture_output=True, text=True)
+    except OSError:
+        return False
+    return r.returncode == 0 and r.stdout.strip().splitlines()[-1:] == ["1"]
+
+
 def _pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)

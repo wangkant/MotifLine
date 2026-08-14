@@ -1,4 +1,5 @@
 # Snakefile
+import contextlib
 import json
 import os
 import sys
@@ -7,7 +8,7 @@ from pathlib import Path
 configfile: "config/default.yaml"
 
 from motifline import contracts, guards
-from motifline.gpu import free_gpu_uuids, gpu_lease
+from motifline.gpu import env_sees_cuda, free_gpu_uuids, gpu_lease
 from motifline.lexicons import attr_width, lexicon_batch, lexicon_path
 from motifline.versions import dist_info_version
 
@@ -313,17 +314,26 @@ rule call_hits_v041:
                 "-r", f"{reg_dir}/regions.npz", "-m", f"{mod_dir}/modisco.h5",
                 "-o", out, "-t", str(f["threshold"]), "-l", str(f["alpha"]),
                 "-b", str(f["batch"])]
-        with gpu_lease(GPU_LOCKS, leave_free=1, wait_s=GPU_WAIT_S) as uuid:
+        # Lease a card only if this finemo's torch can reach one. Measured on this
+        # node it cannot (torch 2.13.0+cu130 vs driver 555.42.06), and leasing
+        # anyway squatted a GPU for 65 min of pure CPU work while an attribution
+        # shard sat stopped behind it. The runtime fact is recorded either way.
+        sees_cuda = env_sees_cuda(f"{ENV_ALT}/bin/python")
+        lease = (gpu_lease(GPU_LOCKS, leave_free=1, wait_s=GPU_WAIT_S) if sees_cuda
+                 else contextlib.nullcontext(None))
+        with lease as uuid:
             contracts.run_stage(
                 out, "call_hits", argv,
                 params={"attr_dir": attr_dir, "lexicon_dir": mod_dir, **f,
-                        "gpu_uuid": uuid, "cross_version_experiment": True,
+                        "gpu_uuid": uuid, "runtime_sees_cuda": sees_cuda,
+                        "device": "cuda" if sees_cuda else "cpu",
+                        "cross_version_experiment": True,
                         "regions_extracted_with": xv["regions_extracted_with"],
                         "finemo_env": ENV_ALT,
                         "software": {**compute_versions(),
                                      "finemo": dist_info_version(SP_ALT, "finemo")}},
                 inputs=[f"{reg_dir}/regions.npz", f"{mod_dir}/modisco.h5"],
-                env={"CUDA_VISIBLE_DEVICES": uuid},
+                env={"CUDA_VISIBLE_DEVICES": uuid} if uuid else None,
                 pre_guards=[
                     lambda: (guards.upstream_success(reg_dir), reg_dir),
                     lambda: (guards.upstream_success(mod_dir), mod_dir),
