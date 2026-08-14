@@ -74,6 +74,30 @@ def crop_center(arr, w):                       # (N,4,L) -> (N,4,w)
     return arr[..., s:s + w]
 
 
+_NARROWPEAK_FILLER = ["."] * 6
+
+
+def narrowpeak_text(rows):
+    """``(chr, start, end, summit)`` rows -> the 11-column bed the next stage needs.
+
+    AG's peak frame is 4-column, but ``finemo extract-regions-modisco-fmt -p``
+    names the first ten columns of a bed positionally and reads the **summit
+    from column 10** (`finemo/data_io.py:36-47`). Handed the 4-column frame it
+    does not misread it, it refuses to open it -- polars ``ShapeError: The
+    length of the new names list should be equal to or less than the original
+    column length`` (verified against the installed finemo 0.30, 2026-08-14).
+
+    The expansion is character-for-character ``motifline.adopt.normalize_peaks``,
+    which is what the *adopted* AG runs write and which reproduces the archive's
+    own ``peaks_np.bed`` byte-for-byte; a computed AG run has to write the same
+    file as an adopted one or the two runs' hits are not comparable. It is
+    duplicated rather than imported because a compute-layer step may not import
+    motifline -- ``tests/test_step_attr_ag.py`` pins the two together.
+    """
+    return "".join("\t".join([str(c), str(s), str(e), *_NARROWPEAK_FILLER, str(m), "True"]) + "\n"
+                   for c, s, e, m in rows)
+
+
 def main():
     a = parse_args()
     sys.path.insert(0, a.chrombpnet_src)
@@ -153,7 +177,9 @@ def main():
     ohe = np.concatenate([np.load(f"{cdir}/ohe_{c}.npy") for c in range(n_chunks)], 0)
     np.save(f"{a.out_dir}/attr{suffix}.npy", attr.astype(np.float32))
     np.save(f"{a.out_dir}/ohe{suffix}.npy", ohe.astype(np.int8))
-    df.to_csv(f"{a.out_dir}/regions{suffix}.bed", sep="\t", header=False, index=False)
+    with open(f"{a.out_dir}/regions{suffix}.bed", "w") as fh:
+        fh.write(narrowpeak_text(df[["chr", "start", "end", "summit"]]
+                                 .itertuples(index=False, name=None)))
     print(f"DONE attr={attr.shape} ohe={ohe.shape}", flush=True)
 
 
