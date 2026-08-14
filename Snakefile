@@ -1,6 +1,7 @@
 # Snakefile
 import json
 import os
+import sys
 from pathlib import Path
 
 configfile: "config/default.yaml"
@@ -27,8 +28,12 @@ def attr_width(r):
 
 # One shard per GPU with 8 threads was the measured optimum for AG (run_ag_par_hyp.sh:14-16);
 # without a cap the process oversubscribes the node's cores.
+# NUMBA_NUM_THREADS is in the list because MoDISco's hot loops are numba, not BLAS:
+# without it numba takes all 80 cores per process and four concurrent discover jobs
+# drive the load average past 200.
 COMPUTE_THREADS = {k: "8" for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
-                                    "NUMEXPR_NUM_THREADS", "TORCH_NUM_THREADS")}
+                                    "NUMEXPR_NUM_THREADS", "TORCH_NUM_THREADS",
+                                    "NUMBA_NUM_THREADS")}
 
 def attr_argv(r, out):
     """Model-dispatched attribution command line; both steps write attr/ohe/regions.bed."""
@@ -63,14 +68,48 @@ def attr_params(r):
     return {"hypothetical": True, "model": r["model"], "in_window": r["in_window"],
             "head": r.get("head"), "random_state": 42, "software": compute_versions(), **extra}
 
+ORCH_PY = sys.executable  # the python running snakemake == the motifline orchestration env
+
+# An adopted run links an archived attr/ohe pair in instead of computing one; the two
+# producers write the same three files, so the run names are partitioned between them
+# rather than left to snakemake to disambiguate.
+ADOPTED = sorted(k for k, v in config["runs"].items() if v.get("adopt_from"))
+COMPUTED = sorted(k for k, v in config["runs"].items() if not v.get("adopt_from"))
+
 rule all:
     input:
         expand("results/{run}/equivalence/attr_report.json",
                run=["k562_cbp_slice500", "k562_ag_slice200"]),
-        expand("results/{run}/hits/hits.tsv", run=["k562_cbp_slice500"])
+        expand("results/{run}/hits/hits.tsv", run=["k562_cbp_slice500"]),
+        expand("results/{run}/equivalence/{report}_report.json",
+               run=ADOPTED, report=["modisco", "hits"])
+
+rule import_attr:
+    """Adopt archived attributions: symlink attr/ohe, normalize peaks -> regions.bed."""
+    output: "results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy", "results/{run}/attr/regions.bed"
+    wildcard_constraints: run="|".join(ADOPTED) if ADOPTED else "$^"
+    run:
+        r = rundef(wildcards)
+        out = f"results/{wildcards.run}/attr"
+        src = r["adopt_from"]
+        w = attr_width(r)
+        peaks_src = os.path.join(src, r.get("adopt_peaks", "peaks.bed"))
+        argv = [ORCH_PY, "-m", "motifline.adopt", "--src_dir", src, "--out_dir", out,
+                "--expected_rows", str(r["rows"]), "--expected_width", str(w),
+                "--peaks_name", r.get("adopt_peaks", "peaks.bed")]
+        contracts.run_stage(
+            out, "import_attr", argv,
+            params={"hypothetical": True, "model": r["model"], "in_window": r["in_window"],
+                    "crop": r.get("crop"), "head": None, "adopted_from": src,
+                    "adopted_peaks": peaks_src, "expected_rows": r["rows"],
+                    "attr_width": w, "software": compute_versions()},
+            inputs=[os.path.join(src, "attr.npy"), os.path.join(src, "ohe.npy"), peaks_src],
+            post_guards=[lambda: (guards.rows_and_width_match(
+                f"{out}/attr.npy", f"{out}/ohe.npy", f"{out}/regions.bed", w), out)])
 
 rule attribute:
     output: "results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy", "results/{run}/attr/regions.bed"
+    wildcard_constraints: run="|".join(COMPUTED) if COMPUTED else "$^"
     resources: gpu=1
     run:
         r = rundef(wildcards)
@@ -86,8 +125,11 @@ rule attribute:
             post_guards=[lambda: (guards.rows_and_width_match(
                 f"{out}/attr.npy", f"{out}/ohe.npy", f"{out}/regions.bed", w), out)])
 
+ATTR_FILES = ["results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy",
+              "results/{run}/attr/regions.bed"]
+
 rule discover:
-    input: rules.attribute.output
+    input: ATTR_FILES
     output: "results/{run}/modisco/modisco.h5"
     run:
         r = rundef(wildcards)
@@ -101,6 +143,7 @@ rule discover:
             params={"attr_dir": attr_dir, "attr_hypothetical": True,
                     **config["modisco"], "software": compute_versions()},
             inputs=[f"{attr_dir}/attr.npy", f"{attr_dir}/ohe.npy"],
+            env=COMPUTE_THREADS,
             pre_guards=[
                 lambda: (guards.upstream_success(attr_dir), attr_dir),
                 lambda: (guards.attr_is_hypothetical(attr_dir), attr_dir),
@@ -108,7 +151,7 @@ rule discover:
                                                      f"{attr_dir}/regions.bed", attr_width(r)), attr_dir)])
 
 rule extract_regions:
-    input: rules.attribute.output
+    input: ATTR_FILES
     output: "results/{run}/finemo_regions/regions.npz"
     run:
         r = rundef(wildcards)
@@ -158,8 +201,9 @@ rule call_hits:
                 lambda: (guards.finemo_version_matches(reg_dir, SP), SP)])
 
 rule equivalence_attr:
-    input: rules.attribute.output
+    input: ATTR_FILES
     output: "results/{run}/equivalence/attr_report.json"
+    wildcard_constraints: run="|".join(COMPUTED) if COMPUTED else "$^"
     run:
         from motifline.equivalence import compare_attr
         r = rundef(wildcards)
@@ -167,3 +211,25 @@ rule equivalence_attr:
         rep = compare_attr(f"results/{wildcards.run}/attr", r["old_attr"],
                            r["old_regions"], r["head"], output[0])
         print(json.dumps(rep, indent=2))
+
+rule equivalence_modisco:
+    """Level-2 consistency report: new lexicon vs the archived modisco.h5 (no gate)."""
+    input: new="results/{run}/modisco/modisco.h5"
+    output: "results/{run}/equivalence/modisco_report.json"
+    run:
+        from motifline.equivalence import compare_modisco
+        r = rundef(wildcards)
+        os.makedirs(f"results/{wildcards.run}/equivalence", exist_ok=True)
+        rep = compare_modisco(input.new, r["old_modisco"], output[0])
+        print(json.dumps({k: v for k, v in rep.items() if k != "per_old_pattern"}, indent=2))
+
+rule equivalence_hits:
+    """Level-3 consistency report: new hits vs the archived finemo hits (no gate)."""
+    input: new="results/{run}/hits/hits.tsv"
+    output: "results/{run}/equivalence/hits_report.json"
+    run:
+        from motifline.equivalence import compare_hits
+        r = rundef(wildcards)
+        os.makedirs(f"results/{wildcards.run}/equivalence", exist_ok=True)
+        rep = compare_hits(input.new, r["old_hits"], output[0])
+        print(json.dumps({k: v for k, v in rep.items() if k != "per_motif_counts"}, indent=2))
