@@ -3,6 +3,7 @@ envs:
   compute: <KANT_ROOT>/envs/chrombpnet_local
 compute_site_packages: <KANT_ROOT>/envs/chrombpnet_local/lib/python3.10/site-packages
 chrombpnet_src: <KANT_ROOT>/models/chrombpnet-pytorch
+ag_src: <KANT_ROOT>/models/alphagenome-pytorch-deeplift/src
 genome:
   fasta: <KANT_ROOT>/data/genome/hg38.fa
   chrom_sizes: <KANT_ROOT>/data/genome/hg38.chrom.sizes
@@ -15,5 +16,18 @@ runs:
     in_window: 2114
     old_attr: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/attr.npy
     old_regions: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
+  k562_ag_slice500:
+    model: ag
+    weights: <KANT_ROOT>/data/alphagenome/model_fold_0.safetensors
+    ag_src: <KANT_ROOT>/models/alphagenome-pytorch-deeplift/src
+    peaks: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
+    track: 60
+    head: 500
+    in_window: 16384
+    crop: 2114
+    n_shuffles: 20
+    chunk: 100
+    old_attr: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/attr.npy
+    old_regions: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/peaks.bed
 modisco: {max_seqlets: 1000000, window: 500}
 finemo: {alpha: 0.7, threshold: 0.3, batch: 1000, mode: pp}
