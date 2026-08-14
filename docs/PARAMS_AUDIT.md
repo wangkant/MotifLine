@@ -193,3 +193,54 @@ shared GPU are exactly the failures that look like a result.
 | `--chunk` (AG) | 100 | Checkpoint granularity inside a shard (unchanged from §5). Chunk files live in `_chunks_<i>/` per shard so shard 1's chunk 0 can never be resume-skipped as shard 0's. |
 | GPU selection | fully-free cards only, one always held back, pinned by UUID, claimed through a lock directory | Project standing rule. nvidia-smi alone is not enough with concurrent shards: both read the same idle card before either allocates. |
 | `-j` / `--resources gpu` | 2 (batch 3, K562-CBP) | Not a preference: 3 cards were fully free at launch (2026-08-14 07:29) and one is always left free. Others' jobs held GPUs 0,1,2,4,6,7,8. |
+
+## 11. finemo 0.41 — the cross-version stage (batch 4)
+
+`rule call_hits_v041` runs `envs/mmv_verify/bin/finemo` (0.41) on the regions
+and lexicon that 0.30 produced. Source tag `help:finemo-hits@0.41` =
+`envs/mmv_verify/bin/finemo call-hits --help`, run 2026-08-14.
+
+**Every flag motifline passes exists in 0.41 with the same letter, the same
+meaning and the same official default.** The CLI comparison is therefore a
+one-line answer: nothing had to change.
+
+| Parameter | 0.30 official | 0.41 official | Passed by motifline | Note |
+|---|---|---|---|---|
+| `-M/--mode` | `pp` | `pp` | `pp` | choice list reordered (`{pp,ph,hh,hp}` → `{pp,hh,hp,ph}`), same members |
+| `-t/--cwm-trim-threshold` | `0.3` | `0.3` | `0.3` | help text now says "The **default** threshold", because of `-T` below |
+| `-l/--global-lambda` | `0.7` | `0.7` | `0.7` | same |
+| `-b/--batch-size` | `2000` | `2000` | `2000` | same |
+| `-s`,`-i`,`-j`,`-c`,`-S`,`-f`,`-q`,`-J`,`-d` | as §3 | identical defaults | unset | `-d` still deprecated in 0.41 |
+
+New in 0.41, **not used** (leaving them unset reproduces 0.30's behaviour):
+
+| New flag | What it does | Why unset |
+|---|---|---|
+| `-T/--cwm-trim-thresholds` | per-motif trim thresholds from a TSV | 0.30 has no equivalent; using it would make the comparison about two things |
+| `-R/--cwm-trim-coords` | explicit per-motif trim start/end from a TSV | same |
+
+Version bookkeeping for this stage (params.json):
+`software.finemo = "0.41"`, `finemo_env = envs/mmv_verify`,
+`cross_version_experiment = true`, `regions_extracted_with = "0.30"`.
+The `finemo_version_matches` guard (regions vs runtime) is **replaced, not
+dropped**, by `recorded_finemo_version_is(regions, "0.30")` +
+`finemo_version_declared("0.41", mmv_verify site-packages)`; the pairing this
+stage claims is therefore checked on both sides.
+
+## 12. External-lexicon routing — `rule call_hits_lexicon` (batch 4)
+
+Ported from `new_experiment/region_v4/05_allcluster_lexicon/run_finemo.sh`
+(`lexicon_for` :39-51, `width_for` :51, `BATCH` :31-36) into
+`src/motifline/lexicons.py` + `config/default.yaml: lexicons`.
+
+| Parameter | Historical value (source) | Official value (source) | Canonical | Reason |
+|---|---|---|---|---|
+| `-m/--modisco-h5` | route table, `run_finemo.sh:39-50` | required, no default | route table, transcribed to `config.lexicons.routes` | Data path. `gw` = each model's own genome-wide lexicon; `mmv` = one shared union lexicon for both models, deliberately (`run_finemo.sh:43-47`). |
+| `-b/--batch-size` | `1000` (`run_finemo.sh:31`) | `2000` (`help:finemo-hits`) | **`1000`** | **Technical (OOM), the one accepted deviation in this rule.** `fit_contribs` materialises `(F.conv1d(contribs**2, cwm_mask) + eps)**-0.5` of shape `(b, n_motifs, L-W+1)` three times; at `b=2000` over the union lexicon this exceeds a 49 GiB card (`run_finemo.sh:31-36,80-85`). Measured cost of `2000→1000` on the gw route, same lexicon and regions: 54808 → 54810 calls, 4 differ (0.0036%) — inside that caller's own run-to-run jitter (0–0.016%). Applied to **both** routes so the lexicon stays the only difference between them. Kept separate from `config.finemo.batch` (still the official 2000) so the deviation cannot leak into the ordinary `call_hits` rule. |
+| `-w` (extract) | `2114` cbp / `2048` ag2048 (`width_for`, `run_finemo.sh:51`) | `1000` | attribution width | As §2: the width is data. In motifline it comes from `lexicons.attr_width(run)` (crop for AG, in_window for CBP), so the shell's two-branch `width_for` is not a separate table. |
+| `-M`, `-t`, `-l` | `pp`, `0.3`, `0.7` (`run_finemo.sh:97`) | same | same | official = historical |
+
+The union lexicon `mmv/lexicons_v2/core.h5` holds **289** patterns (236 pos +
+53 neg, counted 2026-08-14), not the 331 the shell comment quotes — 331 is the
+node count of the `align` graph the lexicon was compiled from, not the number
+of motifs that survived into `core.h5`. The OOM argument is unaffected.

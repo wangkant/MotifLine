@@ -1,7 +1,12 @@
 kant: <KANT_ROOT>
 envs:
   compute: <KANT_ROOT>/envs/chrombpnet_local
+  # Second finemo, for the 0.30-vs-0.41 comparison ONLY (rule call_hits_v041).
+  # Nothing else in the DAG may use it: the version guard on `call_hits` pins the
+  # hit caller to the version that extracted the regions.
+  finemo_alt: <KANT_ROOT>/envs/mmv_verify
 compute_site_packages: <KANT_ROOT>/envs/chrombpnet_local/lib/python3.10/site-packages
+finemo_alt_site_packages: <KANT_ROOT>/envs/mmv_verify/lib/python3.12/site-packages
 chrombpnet_src: <KANT_ROOT>/models/chrombpnet-pytorch
 ag_src: <KANT_ROOT>/models/alphagenome-pytorch-deeplift/src
 genome:
@@ -41,6 +46,7 @@ runs:
     n_shards: 4
     rows: 33917
     in_window: 2114
+    cross_version_hits: true      # also call hits with the alternate finemo (0.41)
     old_attr: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/attr.npy
     old_regions: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
     old_modisco: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
@@ -88,6 +94,22 @@ runs:
     in_window: 2114
     old_modisco: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_cbp_par_hyp/modisco.h5
     old_hits: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_cbp_par_hyp/finemo_hits/hits.tsv
+  # One Leiden-cluster context, adopted for the external-lexicon routes. cl1's
+  # attr.npy/ohe.npy are a byte-identical ROW SUBSET of the same archived K562 CBP
+  # attribution that k562_cbp_adopted links (prep_allclusters.py:56-80 slices
+  # interpret_cbp_par_hyp on an explicit (chrom, summit_abs) join); verified in
+  # docs/RUNS.md. That is what makes its archived hits a legitimate comparison
+  # object for this pipeline's output.
+  k562_cbp_cl1_adopted:
+    model: cbp
+    lexicon_model: cbp            # key into lexicons.routes, i.e. the shell's $m
+    adopt_from: <KANT_ROOT>/new_experiment/region_v4/04_cbp_only_islands/allclusters/cl1
+    adopt_peaks: peaks_np.bed
+    rows: 2399
+    in_window: 2114
+    lexicon_hits:                 # archived per-route hits for this context
+      gw: <KANT_ROOT>/new_experiment/region_v4/05_allcluster_lexicon/hits_gw/cbp/cl1/finemo_hits/hits.tsv
+      mmv: <KANT_ROOT>/new_experiment/region_v4/05_allcluster_lexicon/hits_mmv/cbp/cl1/finemo_hits/hits.tsv
   gm12878_ag_adopted:
     model: ag
     adopt_from: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_ag_par_hyp
@@ -111,3 +133,28 @@ finemo:
   alpha: 0.7             # -l/--global-lambda, official default
   batch: 2000            # -b, official default (vertical slice ran 1000)
   # -s 3.0, -i 0.08, -j 0.7, -c 5e-4, -S 10000 left unset = official defaults
+
+# External-lexicon hit calling: `-m` points at an archived lexicon instead of the
+# run's own modisco.h5. Paths transcribed from
+# new_experiment/region_v4/05_allcluster_lexicon/run_finemo.sh:39-51 (lexicon_for).
+lexicons:
+  batch: 1000            # -b. DEVIATION from the official 2000, kept from
+                         # run_finemo.sh:31-36: fit_contribs materialises
+                         # (b, n_motifs, 2065) three times, so b=2000 over the
+                         # 289-pattern union OOMs a 49 GiB card. Measured cost of
+                         # the change on the gw route, same lexicon and regions:
+                         # 54808 -> 54810 calls, 4 differ (0.0036%). Applied to
+                         # BOTH routes so the lexicon stays the only difference.
+  routes:
+    gw:                  # each model's own genome-wide MoDISco lexicon
+      cbp: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
+      ag2048: <KANT_ROOT>/new_experiment/region_v4/02_motif_grammar/interpret_ag2048_par_hyp/k562/modisco.h5
+    mmv:                 # ONE motifmultiverse union lexicon for both models, deliberately
+      cbp: <KANT_ROOT>/new_experiment/region_v4/05_allcluster_lexicon/mmv/lexicons_v2/core.h5
+      ag2048: <KANT_ROOT>/new_experiment/region_v4/05_allcluster_lexicon/mmv/lexicons_v2/core.h5
+
+# finemo 0.30-vs-0.41 comparison (docs/PARAMS_AUDIT.md). The 0.41 stage reuses the
+# regions.npz and modisco.h5 that 0.30 produced -- that is the experiment.
+cross_version:
+  finemo: "0.41"
+  regions_extracted_with: "0.30"

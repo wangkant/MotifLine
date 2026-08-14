@@ -104,3 +104,59 @@ def finemo_version_matches(recorded_dir, site_packages) -> GuardResult:
         return _fail(gid, f"installed finemo {installed} != recorded {recorded}; "
                           "hitcaller.py differs between versions, hits would not be comparable")
     return _ok(gid)
+
+
+def finemo_version_declared(declared, site_packages) -> GuardResult:
+    """The finemo the stage says it is running is the finemo installed there.
+
+    The cross-version comparison stage deliberately feeds 0.30-extracted regions
+    to the 0.41 hit caller, so ``finemo_version_matches`` (regions vs runtime)
+    would refuse it for the very property it exists to measure. What still has
+    to hold is that the stage's recorded ``software.finemo`` is not a label
+    someone typed: it must equal the version of the interpreter the argv points
+    at, or the resulting table is attributed to the wrong hitcaller.
+    """
+    gid = "finemo_version_declared"
+    try:
+        installed = dist_info_version(site_packages, "finemo")
+    except LookupError as e:
+        return _fail(gid, str(e))
+    if installed != str(declared):
+        return _fail(gid, f"stage declares finemo {declared} but {site_packages} "
+                          f"has {installed}; the run would be filed under the wrong version")
+    return _ok(gid)
+
+
+def recorded_finemo_version_is(recorded_dir, expected) -> GuardResult:
+    """The upstream stage really was produced by the version this stage claims.
+
+    ``regions_extracted_with`` is the other half of the cross-version record;
+    if the regions were silently re-extracted the experiment stops being a
+    comparison of hit callers alone.
+    """
+    gid = "recorded_finemo_version_is"
+    p, err = _success_params(recorded_dir)
+    if err:
+        return _fail(gid, err)
+    recorded = (p.get("software") or {}).get("finemo")
+    if recorded is None:
+        return _fail(gid, f"{recorded_dir}: no software.finemo recorded in params")
+    if recorded != str(expected):
+        return _fail(gid, f"{recorded_dir} was produced by finemo {recorded}, "
+                          f"but this stage records regions_extracted_with={expected}")
+    return _ok(gid)
+
+
+def lexicon_exists(lexicon_h5) -> GuardResult:
+    """An external lexicon path resolves to a file.
+
+    ``finemo call-hits -m`` on a missing path is a crash, but a path pointing at
+    a directory, or at a route that resolved to something unexpected, is the
+    case worth catching before a GPU is leased.
+    """
+    gid = "lexicon_exists"
+    p = Path(lexicon_h5)
+    if not p.is_file():
+        return _fail(gid, f"{p}: external lexicon is not a file "
+                          f"({'directory' if p.is_dir() else 'missing'})")
+    return _ok(gid)
