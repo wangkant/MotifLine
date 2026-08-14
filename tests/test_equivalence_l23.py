@@ -108,3 +108,39 @@ def test_compare_hits_rejects_unexpected_header(tmp_path):
         assert "missing columns" in str(e)
     else:
         raise AssertionError("expected ValueError on an unexpected hits header")
+
+
+def test_identity_map_reads_matches_above_the_cosine_floor(tmp_path):
+    from motifline.equivalence import identity_map_from_modisco_report
+    rep = tmp_path / "modisco_report.json"
+    rep.write_text(json.dumps({"per_old_pattern": [
+        {"old": "pos_patterns/pattern_0", "best_new": "pos_patterns/pattern_3", "cosine": 0.99},
+        {"old": "pos_patterns/pattern_1", "best_new": "pos_patterns/pattern_0", "cosine": 0.40},
+        {"old": "neg_patterns/pattern_0", "best_new": None, "cosine": float("nan")}]}))
+    assert identity_map_from_modisco_report(rep) == {
+        "pos_patterns.pattern_0": "pos_patterns.pattern_3"}
+
+
+def test_compare_hits_renames_archived_motifs_before_joining(tmp_path):
+    # Same motif, renumbered between lexicons: a name join would call it two
+    # different motifs; the identity map must recover the 1:1 count.
+    new = [("chr1", 10, 20, "pos_patterns.pattern_3")] * 1
+    old = [("chr1", 10, 20, "pos_patterns.pattern_0")] * 1
+    imap = {"pos_patterns.pattern_0": "pos_patterns.pattern_3"}
+    naive = compare_hits(_hits(tmp_path / "n1.tsv", new), _hits(tmp_path / "o1.tsv", old),
+                         tmp_path / "r1.json")
+    assert naive["within_tolerance"] is False and naive["join"] == "motif_name"
+    mapped = compare_hits(_hits(tmp_path / "n2.tsv", new), _hits(tmp_path / "o2.tsv", old),
+                          tmp_path / "r2.json", identity_map=imap)
+    assert mapped["join"] == "cwm_identity" and mapped["within_tolerance"] is True
+    assert mapped["exact_jaccard"] == 1.0
+    assert mapped["old_motifs_without_cwm_counterpart"] == []
+
+
+def test_compare_hits_reports_archived_motifs_with_no_counterpart(tmp_path):
+    new = [("chr1", 10, 20, "pos_patterns.pattern_0")]
+    old = [("chr1", 10, 20, "pos_patterns.pattern_0"), ("chr2", 5, 15, "pos_patterns.pattern_9")]
+    rep = compare_hits(_hits(tmp_path / "n.tsv", new), _hits(tmp_path / "o.tsv", old),
+                       tmp_path / "r.json", identity_map={"pos_patterns.pattern_0": "pos_patterns.pattern_0"})
+    assert rep["old_motifs_without_cwm_counterpart"] == ["pos_patterns.pattern_9"]
+    assert any("no new pattern above cosine" in f for f in rep["flags"])

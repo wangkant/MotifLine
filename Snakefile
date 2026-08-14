@@ -224,12 +224,18 @@ rule equivalence_modisco:
         print(json.dumps({k: v for k, v in rep.items() if k != "per_old_pattern"}, indent=2))
 
 rule equivalence_hits:
-    """Level-3 consistency report: new hits vs the archived finemo hits (no gate)."""
-    input: new="results/{run}/hits/hits.tsv"
+    """Level-3 consistency report: new hits vs the archived finemo hits (no gate).
+
+    Joined on CWM identity, not on motif name: MoDISco names patterns by rank, so
+    two lexicons of different sizes reuse the same names for different motifs.
+    """
+    input: new="results/{run}/hits/hits.tsv",
+           modisco_report="results/{run}/equivalence/modisco_report.json"
     output: "results/{run}/equivalence/hits_report.json"
     run:
-        from motifline.equivalence import compare_hits
+        from motifline.equivalence import compare_hits, identity_map_from_modisco_report
         r = rundef(wildcards)
         os.makedirs(f"results/{wildcards.run}/equivalence", exist_ok=True)
-        rep = compare_hits(input.new, r["old_hits"], output[0])
+        imap = identity_map_from_modisco_report(input.modisco_report)
+        rep = compare_hits(input.new, r["old_hits"], output[0], identity_map=imap)
         print(json.dumps({k: v for k, v in rep.items() if k != "per_motif_counts"}, indent=2))

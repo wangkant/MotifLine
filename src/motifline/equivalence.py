@@ -116,8 +116,30 @@ def compare_modisco(new_h5, old_h5, out_json) -> dict:
     return rep
 
 
-def compare_hits(new_tsv, old_tsv, out_json, tol_bp=2) -> dict:
-    """Level-3 consistency: per-motif hit counts and hit-set overlap, new vs archived."""
+def identity_map_from_modisco_report(report_json, min_cosine=CWM_COSINE_TOL) -> dict:
+    """Old-motif -> new-motif names, from the level-2 best-match CWM mapping.
+
+    MoDISco names a pattern by its rank (``pos_patterns.pattern_7``), so when the
+    two lexicons hold different numbers of patterns the same name denotes
+    different motifs and a name-join silently compares unrelated things. This
+    turns the CWM matching already done in ``compare_modisco`` into a rename
+    table; matches weaker than ``min_cosine`` are left out rather than guessed.
+    """
+    rep = json.loads(Path(report_json).read_text())
+    out = {}
+    for r in rep.get("per_old_pattern", []):
+        if r.get("best_new") and r.get("cosine", -1) >= min_cosine:
+            out[r["old"].replace("/", ".")] = r["best_new"].replace("/", ".")
+    return out
+
+
+def compare_hits(new_tsv, old_tsv, out_json, tol_bp=2, identity_map=None) -> dict:
+    """Level-3 consistency: per-motif hit counts and hit-set overlap, new vs archived.
+
+    With ``identity_map`` (see ``identity_map_from_modisco_report``) the archived
+    motif names are translated to their CWM counterparts before any comparison,
+    which is the only join that means anything when the lexicons differ in size.
+    """
     def load(p):
         df = pd.read_csv(p, sep="\t")
         need = [c for c in ("chr", "start", "end", "motif_name") if c not in df.columns]
@@ -126,6 +148,11 @@ def compare_hits(new_tsv, old_tsv, out_json, tol_bp=2) -> dict:
         return df
 
     a, b = load(new_tsv), load(old_tsv)
+    unmapped = []
+    if identity_map:
+        old_names = set(b["motif_name"].unique())
+        unmapped = sorted(old_names - set(identity_map))
+        b = b.assign(motif_name=b["motif_name"].map(lambda m: identity_map.get(m, m)))
     counts = pd.DataFrame({"new": a.groupby("motif_name").size(),
                            "old": b.groupby("motif_name").size()}).fillna(0).astype(int)
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -138,14 +165,19 @@ def compare_hits(new_tsv, old_tsv, out_json, tol_bp=2) -> dict:
     per_motif = counts.reset_index().rename(columns={"index": "motif_name"})
     per_motif = per_motif.where(pd.notnull(per_motif), None).to_dict("records")
     rep = {"new_tsv": str(new_tsv), "old_tsv": str(old_tsv),
+           "join": "cwm_identity" if identity_map else "motif_name",
            "n_new": int(len(a)), "n_old": int(len(b)),
            "ratio_total_new_over_old": float(len(a) / len(b)) if len(b) else float("nan"),
            "exact_jaccard": len(exact_a & exact_b) / max(1, len(exact_a | exact_b)),
            "tolerant_jaccard": len(ka & kb) / max(1, len(ka | kb)), "tol_bp": tol_bp,
            "hit_ratio_band": list(HIT_RATIO_BAND),
            "n_motifs_new": int((counts["new"] > 0).sum()), "n_motifs_old": int((counts["old"] > 0).sum()),
+           "old_motifs_without_cwm_counterpart": unmapped,
            "per_motif_counts": per_motif}
     flags = []
+    for m in unmapped:
+        flags.append(f"{m}: archived motif has no new pattern above cosine {CWM_COSINE_TOL}; "
+                     "its hits are counted under its own name")
     for r in per_motif:
         ratio = r["ratio_new_over_old"]
         if ratio is None or (isinstance(ratio, float) and np.isnan(ratio)):
