@@ -219,6 +219,16 @@ New in 0.41, **not used** (leaving them unset reproduces 0.30's behaviour):
 | `-T/--cwm-trim-thresholds` | per-motif trim thresholds from a TSV | 0.30 has no equivalent; using it would make the comparison about two things |
 | `-R/--cwm-trim-coords` | explicit per-motif trim start/end from a TSV | same |
 
+**Device is not a parameter here, it is a fact about the node.** `envs/mmv_verify`
+ships torch `2.13.0+cu130`; this node's driver is `555.42.06` (CUDA 12.5), so
+that torch reports no GPU and finemo 0.41 runs on the CPU
+(`hitcaller.py:558 RuntimeWarning: No GPU available. Running on CPU.`).
+`envs/chrombpnet_local` ships torch `2.3.1+cu121` and does use the GPU. The
+stage therefore records `runtime_sees_cuda` and `device`, and
+`gpu.env_sees_cuda` stops it leasing a card it cannot use. **Any runtime
+comparison between the two versions on this node is CPU-vs-GPU and says nothing
+about the versions.**
+
 Version bookkeeping for this stage (params.json):
 `software.finemo = "0.41"`, `finemo_env = envs/mmv_verify`,
 `cross_version_experiment = true`, `regions_extracted_with = "0.30"`.
