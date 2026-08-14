@@ -254,3 +254,103 @@ The union lexicon `mmv/lexicons_v2/core.h5` holds **289** patterns (236 pos +
 53 neg, counted 2026-08-14), not the 331 the shell comment quotes — 331 is the
 node count of the `align` graph the lexicon was compiled from, not the number
 of motifs that survived into `core.h5`. The OOM argument is unaffected.
+
+---
+
+## 13. Canonical final values — the whole set on one page (batch 5 close-out)
+
+Every value motifline runs with today. "Official" = the tool's own published
+default, adopted; "deviation" = a value that is not the official default, and
+the reason it is not, in one phrase. **Every deviation in this table is
+technical** — memory, a data width, a required flag with no default, or a
+standing project rule — and each one is argued in the section named beside it.
+No value is here because it is what the archive used.
+
+### Attribution — ChromBPNet (§4)
+
+| parameter | canonical | official? |
+|---|---|---|
+| `in_window` | 2114 | deviation — data: the model's trained input width |
+| `task` | `counts` | deviation — project canon: counts head = accessibility level |
+| `batch_size` | 32 | deviation — memory (= tangermeme's own default) |
+| `n_shuffles` | 20 | official |
+| `references` | `dinucleotide_shuffle` | official |
+| `target` | 0 | official |
+| `hypothetical` | **True** | deviation — standing project rule; `attr_is_hypothetical` enforces it |
+| `random_state` | 42 | deviation — reproducibility (official `None` re-randomizes) |
+| `warning_threshold` | 1e8 | deviation — disables an abort, numerically inert |
+| `device` | `cuda` | official |
+
+### Attribution — AlphaGenome (§5)
+
+| parameter | canonical | official? |
+|---|---|---|
+| `in_window` | 16384 | deviation — data: AG's validated DeepLIFT window |
+| `crop` | 2114 | deviation — data: makes AG rows the width of CBP rows |
+| `track` | 60 (K562) / 63 (GM12878) | site data |
+| `batch_size` | 1 | deviation — memory (16384bp × 20 refs) |
+| `references` | `deeplift.local_dinucleotide_shuffle` | deviation — required for AG's long inputs |
+| `n_shuffles` | 20 | official |
+| `target` | 0 | official |
+| `additional_nonlinear_ops` | AG op table (softmax log-ratio on, layernorm off) | deviation — tangermeme has no rule for AG's ops; `None` gives wrong gradients |
+| `hypothetical` | **True** | deviation — standing project rule (CLI *requires* `--hypothetical`) |
+| `warning_threshold` | 1e8 | deviation — as CBP |
+| `random_state` | 42 | deviation — as CBP |
+| `chunk` | 100 | checkpoint granularity; no effect on output |
+
+### Discovery — `modisco motifs` (§1)
+
+| parameter | canonical | official? |
+|---|---|---|
+| `-n/--max_seqlets` | 1000000 | **no official default exists** (flag is `required=True`) |
+| `-w/--window` | **400** | official (was 500 in region_v3 — the one canonical≠historical value) |
+| `-l -z -t -f -g -j` | unset → 2, 20, 30, 5, 10, 0 | official |
+
+### Region extraction — `finemo extract-regions-modisco-fmt` (§2)
+
+| parameter | canonical | official? |
+|---|---|---|
+| `-w/--region-width` | attribution width (2114) | deviation — data: `-w 1000` would crop 1114bp away |
+| `-p/--peaks` | the stage's `regions.bed` | required for genomic coordinates downstream |
+| `-C/--chrom-order` | unset | official |
+
+### Hit calling — `finemo call-hits` (§3, §12)
+
+| parameter | canonical | official? |
+|---|---|---|
+| `-M/--mode` | `pp` | official |
+| `-t/--cwm-trim-threshold` | 0.3 | official |
+| `-l/--global-lambda` | 0.7 | official |
+| `-b/--batch-size`, own lexicon (`config.finemo.batch`) | **2000** | official |
+| `-b/--batch-size`, external union lexicon (`config.lexicons.batch`) | **1000** | deviation — OOM on a 49 GiB card at 289 patterns; measured cost 4 calls in 54810 (0.0036%) |
+| `-s -i -j -c -S -f -q -J` | unset | official |
+| `-d/--device` | **not passed** | official guidance (deprecated); GPU pinned by `CUDA_VISIBLE_DEVICES` UUID |
+
+### Comparison tolerances (§8)
+
+| check | band | binding? |
+|---|---|---|
+| attr per-row Pearson (level 1) | ≥ 0.999 | **hard gate** |
+| per-motif hit count ratio | 0.8 – 1.25 | soft — flag + attribution |
+| best-match CWM cosine | ≥ 0.85 | soft — flag + attribution |
+| pos/neg pattern count difference | ≤ 2 | soft — flag + attribution |
+
+### Orchestration (§10)
+
+| parameter | canonical |
+|---|---|
+| shard bounds | `np.linspace(0, N, n_shards+1).astype(int)`, cut before any masking |
+| `n_shards` | 4 (`k562_cbp_full`), 6 (`k562_ag_full`, cancelled) |
+| GPU selection | fully-free cards only, one always held back, pinned by UUID via `.gpu_locks/` |
+| snakemake rerun trigger | **`--rerun-triggers mtime`** — the standard invocation; see `README.md` |
+
+### What canonical is *not*
+
+Two values that appear on disk and are **not** canonical, kept only so their
+artifacts stay readable:
+
+* `results/k562_cbp_slice500/hits/` ran `-b 1000` (the vertical slice's value,
+  before the audit). Not recomputed; §3 records why that is harmless.
+* `results/k562_ag_slice200/attr/regions.bed` is the pre-fix 4-column form. Its
+  level-1 report reads only columns 1–3, so it is unaffected; a rerun would now
+  write the 11-column form every other stage expects.
