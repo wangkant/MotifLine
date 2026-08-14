@@ -3,6 +3,8 @@ envs:
 genome:
   fasta: /path/to/hg38.fa
   chrom_sizes: /path/to/hg38.chrom.sizes
+# shard i runs on gpus[i % len(gpus)]; FiNeMo on gpus[0]
+gpus: [0, 1, 2, 3]
 
 attribution:
   n_shuffles: 20
@@ -13,12 +15,14 @@ runs:
     model: cbp
     wo_bias: /path/to/k562_chrombpnet_nobias.h5
     peaks: config/peaks/k562_allpeaks_33917.bed
+    n_shards: 4
   k562_ag:
     model: ag
     ag_src: /path/to/alphagenome-pytorch/src
     weights: /path/to/alphagenome_weights.safetensors
     peaks: config/peaks/k562_allpeaks_33917.bed
     track: 60           # K562 ATAC
+    n_shards: 4
 
 modisco:
   max_seqlets: 1000000

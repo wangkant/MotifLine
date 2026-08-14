@@ -7,9 +7,15 @@ ENV = config["envs"]["compute"]
 PY = f"{ENV}/bin/python"
 G = config["genome"]
 RUNS = config["runs"]
+GPUS = config["gpus"]
 
 wildcard_constraints:
-    run="[^/]+"
+    run="[^/]+",
+    i=r"\d+"
+
+
+def shards(run):
+    return range(RUNS[run].get("n_shards", 1))
 
 
 def width(run):
@@ -21,7 +27,8 @@ def attr_cmd(w):
     r = RUNS[w.run]
     a = config["attribution"]
     common = (f"--peaks {r['peaks']} --fasta {G['fasta']} --chrom_sizes {G['chrom_sizes']} "
-              f"--out_dir results/{w.run}/attr "
+              f"--out_dir results/{w.run}/shards/{w.i} "
+              f"--shard_i {w.i} --n_shards {len(shards(w.run))} "
               f"--n_shuffles {a['n_shuffles']} --random_state {a['random_state']}")
     if r["model"] == "ag":
         return (f"{PY} {S}/attr_ag.py --ag_src {r['ag_src']} --weights {r['weights']} "
@@ -36,18 +43,35 @@ rule all:
 
 
 rule attribute:
+    input:
+        lambda w: [RUNS[w.run]["peaks"], G["fasta"],
+                   RUNS[w.run].get("wo_bias") or RUNS[w.run]["weights"]]
+    output:
+        "results/{run}/shards/{i}/attr.npy",
+        "results/{run}/shards/{i}/ohe.npy",
+        "results/{run}/shards/{i}/regions.bed"
+    params: cmd=attr_cmd
+    resources: gpu=1
+    log: "results/{run}/shards/{i}/attr.log"
+    run:
+        gpu = GPUS[int(wildcards.i) % len(GPUS)]
+        shell("CUDA_VISIBLE_DEVICES={gpu} {params.cmd} > {log} 2>&1")
+
+
+rule merge_shards:
+    input:
+        lambda w: expand("results/{run}/shards/{i}/{f}", run=w.run, i=shards(w.run),
+                         f=("attr.npy", "ohe.npy", "regions.bed"))
     output:
         "results/{run}/attr/attr.npy",
         "results/{run}/attr/ohe.npy",
         "results/{run}/attr/regions.bed"
-    params: cmd=attr_cmd
-    resources: gpu=1
-    log: "results/{run}/attr/attr.log"
-    shell: "{params.cmd} > {log} 2>&1"
+    params: dirs=lambda w: [f"results/{w.run}/shards/{i}" for i in shards(w.run)]
+    shell: "{PY} {S}/merge_shards.py --out_dir results/{wildcards.run}/attr {params.dirs}"
 
 
 rule discover:
-    input: rules.attribute.output
+    input: rules.merge_shards.output
     output: "results/{run}/modisco/modisco.h5"
     params: m=config["modisco"]
     log: "results/{run}/modisco/modisco.log"
@@ -57,7 +81,7 @@ rule discover:
 
 
 rule extract_regions:
-    input: rules.attribute.output
+    input: rules.merge_shards.output
     output: "results/{run}/finemo_regions/regions.npz"
     params: w=lambda w: width(w.run)
     shell:
@@ -71,5 +95,6 @@ rule call_hits:
     params: f=config["finemo"], out="results/{run}/hits"
     resources: gpu=1
     shell:
-        "{ENV}/bin/finemo call-hits -M {params.f[mode]} -r {input.npz} -m {input.h5} "
-        "-o {params.out} -t {params.f[threshold]} -l {params.f[alpha]} -b {params.f[batch]}"
+        "CUDA_VISIBLE_DEVICES={GPUS[0]} {ENV}/bin/finemo call-hits -M {params.f[mode]} "
+        "-r {input.npz} -m {input.h5} -o {params.out} -t {params.f[threshold]} "
+        "-l {params.f[alpha]} -b {params.f[batch]}"

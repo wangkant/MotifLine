@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """ChromBPNet DeepLIFT/SHAP hypothetical attributions, counts head of the model without its
-bias.
+bias, for one contiguous shard of the peaks.
 
 References: dinucleotide shuffles, seeded by random_state + shuffle index.
 """
@@ -17,6 +17,8 @@ from tangermeme.deep_lift_shap import deep_lift_shap
 ap = argparse.ArgumentParser()
 for k in ("wo_bias", "peaks", "fasta", "chrom_sizes", "out_dir"):
     ap.add_argument(f"--{k}", required=True)
+ap.add_argument("--shard_i", type=int, default=0)
+ap.add_argument("--n_shards", type=int, default=1)
 ap.add_argument("--in_window", type=int, default=2114)
 ap.add_argument("--n_shuffles", type=int, default=20)
 ap.add_argument("--random_state", type=int, default=42)
@@ -66,6 +68,8 @@ sizes = dict(pd.read_csv(a.chrom_sizes, sep="\t", header=None).values)
 half = a.in_window // 2
 center = p[1] + p[9]
 p = p[(center - half > 0) & (center + half <= p[0].map(sizes))].reset_index(drop=True)
+lo, hi = np.linspace(0, len(p), a.n_shards + 1).astype(int)[[a.shard_i, a.shard_i + 1]]
+p = p.iloc[lo:hi].reset_index(drop=True)
 
 fasta = pyfaidx.Fasta(a.fasta)
 acgt = np.frombuffer(b"ACGT", np.uint8)

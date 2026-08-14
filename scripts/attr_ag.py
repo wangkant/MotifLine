@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""AlphaGenome DeepLIFT/SHAP hypothetical attributions.
+"""AlphaGenome DeepLIFT/SHAP hypothetical attributions for one contiguous shard of the peaks.
 
 Target: log1p of the ATAC track summed over the central 1000 bp. References: local
 dinucleotide shuffles, batch size 1.
@@ -17,6 +17,8 @@ ap = argparse.ArgumentParser()
 for k in ("ag_src", "weights", "peaks", "fasta", "chrom_sizes", "out_dir"):
     ap.add_argument(f"--{k}", required=True)
 ap.add_argument("--track", type=int, required=True, help="index into the ATAC head")
+ap.add_argument("--shard_i", type=int, default=0)
+ap.add_argument("--n_shards", type=int, default=1)
 ap.add_argument("--in_window", type=int, default=2048)
 ap.add_argument("--n_shuffles", type=int, default=20)
 ap.add_argument("--random_state", type=int, default=42)
@@ -36,6 +38,8 @@ sizes = dict(pd.read_csv(a.chrom_sizes, sep="\t", header=None).values)
 half = a.in_window // 2
 center = df.start + df.summit
 df = df[(center - half > 0) & (center + half <= df.chr.map(sizes))].reset_index(drop=True)
+lo, hi = np.linspace(0, len(df), a.n_shards + 1).astype(int)[[a.shard_i, a.shard_i + 1]]
+df = df.iloc[lo:hi].reset_index(drop=True)
 
 fasta = pyfaidx.Fasta(a.fasta)
 X = torch.stack([sequence_to_onehot_tensor(fasta[c][m - half:m + half].seq).T
