@@ -12,6 +12,8 @@ measured OOM limit on the 289-motif union lexicon.
 ```
 Snakefile            the DAG: attr -> discover -> extract_regions -> call_hits
 config/default.yaml  runs + shared canonical parameters + site paths
+                     (not tracked: cp config/example.yaml config/default.yaml
+                      and fill in the site paths)
 src/motifline/       adopt / merge_shards / lexicons / runs helpers
 src/motifline/steps/ attr_cbp.py, attr_ag.py (+ ag_support.py) -- compute-env scripts
 skill/SKILL.md       how to drive the pipeline

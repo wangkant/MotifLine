@@ -5,13 +5,14 @@ description: How to drive the motifline pipeline (attribution -> MoDISco -> FiNe
 
 # motifline
 
-Repo: `<KANT_ROOT>/motifline`. A stage directory holds only its
-result files; parameters live in `config/default.yaml`.
+Repo: the motifline checkout root (`<repo>` below). A stage directory holds only
+its result files; parameters live in `config/default.yaml` (copy
+`config/example.yaml` and fill in the site paths).
 
 ## Standard invocation
 
 ```bash
-cd <KANT_ROOT>/motifline
+cd <repo>
 envs/motifline/bin/snakemake --rerun-triggers mtime -j <N> --resources gpu=<G> -- <target>
 ```
 
@@ -99,5 +100,5 @@ union lexicon OOMs at 2000 on a 49GiB card). Don't add per-run overrides.
 
 ```bash
 mkdir -p <repo>/.claude/skills
-ln -s <KANT_ROOT>/motifline/skill <repo>/.claude/skills/motifline
+ln -s <motifline-repo>/skill <repo>/.claude/skills/motifline
 ```

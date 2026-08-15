@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """AlphaGenome DeepLIFT support symbols, copied VERBATIM from the validated source.
 
-Source: <KANT_ROOT>/new_experiment/region_v3/k562/ag_cbp_deeplift_validation/
+Source: <site archive>/new_experiment/region_v3/k562/ag_cbp_deeplift_validation/
         run_validation.py  (copied 2026-08-14)
 Copied symbols: AlphaGenomeWrapper, _ag_nonlinear_ops, ag_seqs_centered, load_peaks.
 

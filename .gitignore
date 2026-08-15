@@ -4,3 +4,4 @@ results/
 .snakemake/
 logs/
 .gpu_locks/
+config/default.yaml

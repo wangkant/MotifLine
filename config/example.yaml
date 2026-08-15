@@ -1,54 +1,54 @@
-kant: <KANT_ROOT>
+kant: /path/to/kant
 envs:
-  compute: <KANT_ROOT>/envs/chrombpnet_local
+  compute: /path/to/kant/envs/chrombpnet_local
   # Second finemo (0.41), for the 0.30-vs-0.41 comparison ONLY (rule
   # call_hits_v041). Nothing else in the DAG uses it: every other hit-calling
   # stage runs the compute env's finemo, the one that extracted the regions.
-  finemo_alt: <KANT_ROOT>/envs/mmv_verify
-chrombpnet_src: <KANT_ROOT>/models/chrombpnet-pytorch
-ag_src: <KANT_ROOT>/models/alphagenome-pytorch-deeplift/src
+  finemo_alt: /path/to/kant/envs/mmv_verify
+chrombpnet_src: /path/to/kant/models/chrombpnet-pytorch
+ag_src: /path/to/kant/models/alphagenome-pytorch-deeplift/src
 genome:
-  fasta: <KANT_ROOT>/data/genome/hg38.fa
-  chrom_sizes: <KANT_ROOT>/data/genome/hg38.chrom.sizes
+  fasta: /path/to/kant/data/genome/hg38.fa
+  chrom_sizes: /path/to/kant/data/genome/hg38.chrom.sizes
 runs:
   k562_cbp_slice500:
     model: cbp
-    wo_bias: <KANT_ROOT>/new_experiment/region_v3/k562/model/chrombpnet_wo_bias.pt
-    peaks: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
+    wo_bias: /path/to/kant/new_experiment/region_v3/k562/model/chrombpnet_wo_bias.pt
+    peaks: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
     head: 500
     in_window: 2114
-    old_attr: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/attr.npy
-    old_regions: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
+    old_attr: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/attr.npy
+    old_regions: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
   k562_ag_slice200:
     model: ag
-    weights: <KANT_ROOT>/data/alphagenome/model_fold_0.safetensors
-    ag_src: <KANT_ROOT>/models/alphagenome-pytorch-deeplift/src
-    peaks: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
+    weights: /path/to/kant/data/alphagenome/model_fold_0.safetensors
+    ag_src: /path/to/kant/models/alphagenome-pytorch-deeplift/src
+    peaks: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
     track: 60
     head: 200
     in_window: 16384
     crop: 2114
     n_shuffles: 20
     chunk: 100
-    old_attr: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/attr.npy
-    old_regions: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/peaks.bed
+    old_attr: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/attr.npy
+    old_regions: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/peaks.bed
   # ---- full-scale canonical production: attributions recomputed in shards ----
   # These are not bit-for-bit reproductions of the archive: they run the tools'
   # official parameters (docs/PARAMS_AUDIT.md), so the archive comparisons below
   # are consistency reports, not gates.
   k562_cbp_full:
     model: cbp
-    wo_bias: <KANT_ROOT>/new_experiment/region_v3/k562/model/chrombpnet_wo_bias.pt
-    peaks: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
+    wo_bias: /path/to/kant/new_experiment/region_v3/k562/model/chrombpnet_wo_bias.pt
+    peaks: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
     head: null
     n_shards: 4
     rows: 33917
     in_window: 2114
     cross_version_hits: true      # also call hits with the alternate finemo (0.41)
-    old_attr: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/attr.npy
-    old_regions: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
-    old_modisco: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
-    old_hits: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/finemo_hits/hits.tsv
+    old_attr: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/attr.npy
+    old_regions: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
+    old_modisco: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
+    old_hits: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/finemo_hits/hits.tsv
   # CANCELLED 2026-08-15 by the user: the AG code path is already proven by the
   # slice-200 level-1 report (r >= 0.9999999994) and AG's downstream by
   # k562_ag_adopted, so a second full-scale AG attribution buys no verification.
@@ -61,9 +61,9 @@ runs:
     cancelled: true
     cancelled_note: results/k562_ag_full/CANCELLED.md
     model: ag
-    weights: <KANT_ROOT>/data/alphagenome/model_fold_0.safetensors
-    ag_src: <KANT_ROOT>/models/alphagenome-pytorch-deeplift/src
-    peaks: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
+    weights: /path/to/kant/data/alphagenome/model_fold_0.safetensors
+    ag_src: /path/to/kant/models/alphagenome-pytorch-deeplift/src
+    peaks: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
     track: 60
     head: null
     n_shards: 6          # ~5653 peaks/shard at ~7.2 s/peak = ~11 h/shard on one card
@@ -72,36 +72,36 @@ runs:
     crop: 2114
     n_shuffles: 20
     chunk: 100
-    old_attr: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/attr.npy
-    old_regions: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/peaks.bed
-    old_modisco: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/modisco.h5
-    old_hits: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/finemo_hits/hits.tsv
+    old_attr: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/attr.npy
+    old_regions: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/peaks.bed
+    old_modisco: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/modisco.h5
+    old_hits: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/finemo_hits/hits.tsv
   # ---- adopted runs: archived attributions linked in, downstream recomputed ----
   k562_cbp_adopted:
     model: cbp
-    adopt_from: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp
+    adopt_from: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp
     adopt_peaks: peaks.bed          # already the 11-col load_region_df form
     rows: 33917
     in_window: 2114
-    old_modisco: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
-    old_hits: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/finemo_hits/hits.tsv
+    old_modisco: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
+    old_hits: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/finemo_hits/hits.tsv
   k562_ag_adopted:
     model: ag
-    adopt_from: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp
+    adopt_from: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp
     adopt_peaks: peaks.bed          # 4-col chr/start/end/summit -> expanded to narrowPeak form
     rows: 33917
     in_window: 16384
     crop: 2114
-    old_modisco: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/modisco.h5
-    old_hits: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_ag_par_hyp/finemo_hits/hits.tsv
+    old_modisco: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/modisco.h5
+    old_hits: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/finemo_hits/hits.tsv
   gm12878_cbp_adopted:
     model: cbp
-    adopt_from: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_cbp_par_hyp
+    adopt_from: /path/to/kant/new_experiment/region_v3/gm12878/interpret_cbp_par_hyp
     adopt_peaks: peaks.bed
     rows: 21084
     in_window: 2114
-    old_modisco: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_cbp_par_hyp/modisco.h5
-    old_hits: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_cbp_par_hyp/finemo_hits/hits.tsv
+    old_modisco: /path/to/kant/new_experiment/region_v3/gm12878/interpret_cbp_par_hyp/modisco.h5
+    old_hits: /path/to/kant/new_experiment/region_v3/gm12878/interpret_cbp_par_hyp/finemo_hits/hits.tsv
   # One Leiden-cluster context, adopted for the external-lexicon routes. cl1's
   # attr.npy/ohe.npy are a byte-identical ROW SUBSET of the same archived K562 CBP
   # attribution that k562_cbp_adopted links (prep_allclusters.py:56-80 slices
@@ -111,22 +111,22 @@ runs:
   k562_cbp_cl1_adopted:
     model: cbp
     lexicon_model: cbp            # key into lexicons.routes, i.e. the shell's $m
-    adopt_from: <KANT_ROOT>/new_experiment/region_v4/04_cbp_only_islands/allclusters/cl1
+    adopt_from: /path/to/kant/new_experiment/region_v4/04_cbp_only_islands/allclusters/cl1
     adopt_peaks: peaks_np.bed
     rows: 2399
     in_window: 2114
     lexicon_hits:                 # archived per-route hits for this context
-      gw: <KANT_ROOT>/new_experiment/region_v4/05_allcluster_lexicon/hits_gw/cbp/cl1/finemo_hits/hits.tsv
-      mmv: <KANT_ROOT>/new_experiment/region_v4/05_allcluster_lexicon/hits_mmv/cbp/cl1/finemo_hits/hits.tsv
+      gw: /path/to/kant/new_experiment/region_v4/05_allcluster_lexicon/hits_gw/cbp/cl1/finemo_hits/hits.tsv
+      mmv: /path/to/kant/new_experiment/region_v4/05_allcluster_lexicon/hits_mmv/cbp/cl1/finemo_hits/hits.tsv
   gm12878_ag_adopted:
     model: ag
-    adopt_from: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_ag_par_hyp
+    adopt_from: /path/to/kant/new_experiment/region_v3/gm12878/interpret_ag_par_hyp
     adopt_peaks: peaks.bed
     rows: 21085
     in_window: 16384
     crop: 2114
-    old_modisco: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_ag_par_hyp/modisco.h5
-    old_hits: <KANT_ROOT>/new_experiment/region_v3/gm12878/interpret_ag_par_hyp/finemo_hits/hits.tsv
+    old_modisco: /path/to/kant/new_experiment/region_v3/gm12878/interpret_ag_par_hyp/modisco.h5
+    old_hits: /path/to/kant/new_experiment/region_v3/gm12878/interpret_ag_par_hyp/finemo_hits/hits.tsv
 
 # Canonical parameters. Every value here is the tool's own official default
 # (`--help` in envs/chrombpnet_local) unless the note says why it cannot be.
@@ -155,11 +155,11 @@ lexicons:
                          # BOTH routes so the lexicon stays the only difference.
   routes:
     gw:                  # each model's own genome-wide MoDISco lexicon
-      cbp: <KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
-      ag2048: <KANT_ROOT>/new_experiment/region_v4/02_motif_grammar/interpret_ag2048_par_hyp/k562/modisco.h5
+      cbp: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
+      ag2048: /path/to/kant/new_experiment/region_v4/02_motif_grammar/interpret_ag2048_par_hyp/k562/modisco.h5
     mmv:                 # ONE motifmultiverse union lexicon for both models, deliberately
-      cbp: <KANT_ROOT>/new_experiment/region_v4/05_allcluster_lexicon/mmv/lexicons_v2/core.h5
-      ag2048: <KANT_ROOT>/new_experiment/region_v4/05_allcluster_lexicon/mmv/lexicons_v2/core.h5
+      cbp: /path/to/kant/new_experiment/region_v4/05_allcluster_lexicon/mmv/lexicons_v2/core.h5
+      ag2048: /path/to/kant/new_experiment/region_v4/05_allcluster_lexicon/mmv/lexicons_v2/core.h5
 
 # finemo 0.30-vs-0.41 comparison (docs/PARAMS_AUDIT.md): rule call_hits_v041
 # reuses the regions.npz and modisco.h5 that the compute env's 0.30 produced and

@@ -16,9 +16,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+import yaml
 
-V3 = Path("<KANT_ROOT>/new_experiment/region_v3/k562/interpret_cbp_par_hyp")
-CL1 = Path("<KANT_ROOT>/new_experiment/region_v4/04_cbp_only_islands/allclusters/cl1")
+_cfg = Path(__file__).resolve().parents[1] / "config" / "default.yaml"
+_kant = Path(yaml.safe_load(_cfg.read_text())["kant"]) if _cfg.exists() else Path("/nonexistent")
+V3 = _kant / "new_experiment/region_v3/k562/interpret_cbp_par_hyp"
+CL1 = _kant / "new_experiment/region_v4/04_cbp_only_islands/allclusters/cl1"
 
 pytestmark = pytest.mark.skipif(
     not (V3 / "attr.npy").exists() or not (CL1 / "attr.npy").exists(),
