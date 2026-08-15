@@ -18,7 +18,7 @@ Two properties of the original are kept rather than reimplemented:
 2. The batch size is a *deviation*, not a default. ``-b 1000`` instead of the
    official 2000 because ``(F.conv1d(contribs**2, cwm_mask) + eps)**-0.5``
    materialises ``(b, n_motifs, 2065)`` three times and a 289-motif union at
-   b=2000 exceeds a 49 GiB card (run_finemo.sh:31-36, docs/PARAMS_AUDIT.md).
+   b=2000 exceeds a 49 GiB card (run_finemo.sh:31-36).
    It therefore lives in config under ``lexicons.batch``, separate from the
    canonical ``finemo.batch``, and is required rather than defaulted.
 """

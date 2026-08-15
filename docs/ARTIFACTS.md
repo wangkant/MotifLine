@@ -95,10 +95,8 @@ hit tables are at that floor, not above it.
 
 `start`/`end` are the **trimmed** coordinates: `call-hits` re-derives each motif's
 extent by trimming its CWM at `-t`, so two runs whose CWMs differ slightly emit
-the same hits at coordinates shifted by a base or two. That is why level-3
-reports carry both an exact and a ±2bp-tolerant Jaccard, and why an exact
-Jaccard far below the tolerant one is a coordinate effect rather than a
-motif-identity one.
+the same hits at coordinates shifted by a base or two — compare hit sets with a
+±2bp tolerance in mind, not by exact coordinates.
 
 `hits_v041/` and `hits_lexicon_<route>/` are **leaves**: nothing in the DAG
 consumes them.
@@ -113,44 +111,6 @@ that each shard's attr/ohe/regions agree on row count, and the rule passes
 `--expected_rows` so a merge over an unfinished shard is a hard error rather
 than a short matrix that still looks valid.
 
-## `equivalence_*` → `equivalence/`
-
-Reports, not results. They are written by the orchestration env, directly from
-the files named in their inputs.
-
-| file | level | gate? |
-|---|---|---|
-| `attr_report.json` | 1 — new attributions vs archived, row by row | **yes**: `passed = regions_aligned AND min_row_pearson >= 0.999` |
-| `modisco_report.json` | 2 — new lexicon vs archived lexicon | no |
-| `hits_report.json` | 3 — new hits vs archived hits | no |
-| `hits_v041_report.json` | 3 — finemo 0.41's hits vs 0.30's, same inputs | no |
-| `hits_lexicon_<route>_report.json` | 3 — external-lexicon hits vs the archive's | no |
-
-`attr_report.json`: `n`, `regions_aligned`, `bitwise_equal_rows`,
-`max_abs_diff`, `min_row_pearson`, `mean_row_pearson`, `row_pearson_gate`,
-`passed`.
-
-`modisco_report.json`: `n_patterns_new/old`, `pos_/neg_new/old`,
-`per_old_pattern` (each archived pattern → its best new match and that cosine),
-`min_/mean_best_cosine`, `n_old_below_cosine_tol`, `flags`, `within_tolerance`.
-
-`hits_report.json`: `join` (`cwm_identity` or `motif_name`), `n_new`, `n_old`,
-`ratio_total_new_over_old`, `exact_jaccard`, `tolerant_jaccard`, `tol_bp`,
-`n_motifs_new/old`, `old_motifs_without_cwm_counterpart`, `per_motif_counts`,
-`flags`, `within_tolerance`.
-
-**`within_tolerance` is a summary of a soft band, not a verdict**, and it never
-suppresses a number. Level 2 and 3 compare runs at canonical (official)
-parameters against an archive built at other parameters, so an out-of-band value
-is evidence about a parameter — to be attributed, in the report, to the
-parameter it belongs to. Only level 1 gates, and it gates on a mathematical
-identity: the same model, the same input, the same code path.
-
-## Absence is not zero
-
-A motif **not discovered**, one **discovered and not hit**, one **the lexicon
-does not contain**, and one whose count is a **measured zero** are four
-different facts. `compare_hits` keeps them apart: a motif absent from the archive
-is a flag naming it, an archived motif with no new CWM counterpart is listed in
-`old_motifs_without_cwm_counterpart` and its hits are counted under its own name
-rather than being quietly dropped into someone else's.
+(The `equivalence_*` comparison rules and their reports were removed on
+2026-08-15 together with the audit layer; pre-existing `equivalence/` result
+directories, if any survive elsewhere, are historical.)

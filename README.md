@@ -1,76 +1,52 @@
 # motifline
 
-Snakemake pipeline from attribution to MoDISco to FiNeMo. Each stage directory
-holds only its result files; the orchestration layer (Python 3.12) stays
-separate from the compute layer (`chrombpnet_local`, Python 3.10), which is
-where every stage body actually runs.
+A Snakemake pipeline from model attributions to MoDISco motifs to FiNeMo hits,
+for ChromBPNet and AlphaGenome, on the same `tangermeme.deep_lift_shap` code
+path. No bespoke algorithms: attribution is tangermeme 1.0.4, discovery is
+modisco-lite 2.4.0, hit calling is finemo 0.30 (pinned). Parameters are the
+tools' official defaults; the one deviation (`lexicons.batch: 1000`) is a
+measured OOM limit on the 289-motif union lexicon.
 
-## Architecture
+## Layout
 
 ```
-config/default.yaml ──────── runs, canonical parameters, lexicon routes
-        │
-        ▼
-   Snakefile (envs/motifline, py3.12)          orchestration layer
-        │   each rule assembles an argv and runs it as a subprocess
-        │   gpu.gpu_lease: one fully-free card by UUID, one always left free
-        │
-        ├── attribute            ─┐
-        ├── attribute_sharded ──► merge_shards ─┐   src/motifline/steps/*.py
-        └── import_attr  (adopt archived attr)  │   (envs/chrombpnet_local, py3.10;
-                                                │    never import motifline)
-                                    attr/  ─────┤
-                                                │
-                    ┌───────────────────────────┴───────────────┐
-                    ▼                                           ▼
-              discover                                  extract_regions
-            modisco/modisco.h5                       finemo_regions/regions.npz
-                    │                                           │
-                    └──────────────┬────────────────────────────┘
-                                   ▼
-                        call_hits ──► hits/hits.tsv
-                        call_hits_lexicon ──► hits_lexicon_<route>/   (external lexicon)
-                        call_hits_v041    ──► hits_v041/              (comparison only)
-                                   │
-                                   ▼
-                     equivalence_attr    (level 1 — HARD GATE, r >= 0.999)
-                     equivalence_modisco (level 2 — report, soft bands)
-                     equivalence_hits    (level 3 — report, soft bands)
+Snakefile            the DAG: attr -> discover -> extract_regions -> call_hits
+config/default.yaml  runs + shared canonical parameters + site paths
+src/motifline/       adopt / merge_shards / lexicons / runs helpers
+src/motifline/steps/ attr_cbp.py, attr_ag.py (+ ag_support.py) -- compute-env scripts
+skill/SKILL.md       how to drive the pipeline
 ```
 
-## Quick start
+## Running
 
 ```bash
-cd <KANT_ROOT>/motifline
-
-# what would run (should say "Nothing to be done" on a finished tree)
-<KANT_ROOT>/envs/motifline/bin/snakemake -n --rerun-triggers mtime
-
-# a specific target, two GPU stages at a time
-<KANT_ROOT>/envs/motifline/bin/snakemake --rerun-triggers mtime -j 2 --resources gpu=2 -- \
-  results/<run>/hits/hits.tsv
-
-# tests
-<KANT_ROOT>/envs/motifline/bin/python -m pytest -q
+envs/motifline/bin/snakemake --rerun-triggers mtime -j <N> --resources gpu=<G> -- <target>
 ```
 
-**Always pass `--rerun-triggers mtime`.** A rule's `run:` block here only
-assembles an argv, so editing it changes snakemake's *code* hash without
-changing anything about the artifact; without the flag a bare `snakemake`
-proposes to recompute finished attributions and hit calls. `snakemake
---cleanup-metadata` would suppress the same trigger by deleting information per
-output file and would have to be repeated after every edit; the flag is one
-documented decision instead.
+`--rerun-triggers mtime` is the standard invocation: the `run:` blocks only
+assemble argv, so snakemake's code trigger would otherwise propose recomputing
+finished stages after any cosmetic edit.
 
-## Where things are written down
+GPU selection is the caller's: `export CUDA_VISIBLE_DEVICES=<uuid>` (fully-free
+cards only, pin by UUID -- indices shift on this node -- and leave one working
+card free), and bound concurrency with `--resources gpu=<G>`.
 
-| file | what it answers |
+## Environments
+
+| env | role |
 |---|---|
-| `skill/SKILL.md` | which rule to use, how to add a run, GPU discipline |
-| `docs/ARTIFACTS.md` | what each stage writes: files, shapes, dtypes |
-| `docs/PARAMS_AUDIT.md` | every parameter vs its official source, and why each deviation exists (§13 = the canonical values on one page) |
-| `docs/RUNS.md` | what has actually been executed and what came out, every number named with its file |
-| `docs/FINAL_REPORT.md` | the project's end state: deliverables, all runs and their verdicts, known residuals |
-| `results/<run>/CANCELLED.md` | for a stopped run: why, its checkpoint state, how to resume |
+| `envs/motifline` (py3.12) | snakemake + this package |
+| `envs/chrombpnet_local` (py3.10) | all compute: torch, chrombpnet, tangermeme, modisco-lite, finemo 0.30 |
+| `envs/mmv_verify` (py3.12) | finemo 0.41, `call_hits_v041` comparison only (its torch runs CPU on this node) |
 
-Design spec: `docs/superpowers/specs/2026-08-14-motifline-design.md`.
+Step scripts never import this package; every site path arrives as an argument
+(AlphaGenome in particular: pass `--ag_src`, the package is not importable from
+the compute env).
+
+## House rules
+
+- Attributions are HYPOTHETICAL (`--hypothetical`), always.
+- hits are produced by finemo 0.30; note the version next to any hits you keep.
+- `new_experiment/region_v3|v4` archives are read-only.
+- peaks fed to finemo must be 10/11-column narrowPeak (summit in column 10);
+  the attribution steps normalize this themselves.

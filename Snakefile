@@ -1,6 +1,4 @@
 # Snakefile
-import contextlib
-import json
 import os
 import subprocess
 import sys
@@ -8,7 +6,6 @@ from pathlib import Path
 
 configfile: "config/default.yaml"
 
-from motifline.gpu import env_sees_cuda, free_gpu_uuids, gpu_lease
 from motifline.lexicons import attr_width, lexicon_batch, lexicon_path
 from motifline.runs import active_runs, cancelled_runs
 
@@ -64,10 +61,9 @@ def attr_argv(r, out, shard_i=None):
 
 ORCH_PY = sys.executable  # the python running snakemake == the motifline orchestration env
 
-# Concurrent GPU stages pick their card through this lock directory, not from
-# nvidia-smi alone: two jobs starting together both see the same idle card.
-GPU_LOCKS = str(Path(workflow.basedir) / ".gpu_locks")
-GPU_WAIT_S = float(config.get("gpu_wait_s", 3600))
+# GPU selection is the caller's: export CUDA_VISIBLE_DEVICES=<uuid> before running,
+# and bound concurrency with --resources gpu=<G>. House rules stay the same --
+# fully-free cards only, pin by UUID (indices shift), leave one working card free.
 
 # An adopted run links an archived attr/ohe pair in instead of computing one; the two
 # producers write the same three files, so the run names are partitioned between them
@@ -78,11 +74,6 @@ COMPUTED = sorted(k for k, v in config["runs"].items() if not v.get("adopt_from"
 # (one GPU each) and merges, a slice run attributes in one process.
 SHARDED = sorted(k for k in COMPUTED if config["runs"][k].get("n_shards"))
 SINGLE = sorted(k for k in COMPUTED if not config["runs"][k].get("n_shards"))
-# Runs that have an archived counterpart to report against, and runs that carry
-# one of the two extra hit-calling stages. Kept as explicit lists so that asking
-# for a report a run has no archive for is an unmatched target, not a KeyError
-# raised halfway through the DAG.
-ARCHIVE_COMPARED = sorted(k for k, v in config["runs"].items() if v.get("old_modisco"))
 # A cancelled run keeps every rule it always had -- it stays resumable by explicit
 # target -- but drops out of the default target list, so a bare `snakemake` cannot
 # restart work somebody stopped on purpose. See motifline/src/motifline/runs.py and
@@ -107,18 +98,13 @@ def shard_outputs(w):
 
 rule all:
     input:
-        expand("results/{run}/equivalence/attr_report.json",
-               run=active_runs(config, ["k562_cbp_slice500", "k562_ag_slice200",
-                                        "k562_cbp_full"])),
         expand("results/{run}/hits/hits.tsv",
-               run=active_runs(config, ["k562_cbp_slice500"])),
-        expand("results/{run}/equivalence/{report}_report.json",
-               run=active_runs(config, ARCHIVE_COMPARED), report=["modisco", "hits"]),
+               run=active_runs(config, sorted(config["runs"]))),
         # finemo 0.30 vs 0.41 on one and the same regions.npz + modisco.h5
-        expand("results/{run}/equivalence/hits_v041_report.json",
+        expand("results/{run}/hits_v041/hits.tsv",
                run=active_runs(config, CROSS_VERSION)),
-        # external-lexicon routes vs their archived per-context hits
-        expand("results/{run}/equivalence/hits_lexicon_{route}_report.json",
+        # external-lexicon routes
+        expand("results/{run}/hits_lexicon_{route}/hits.tsv",
                run=active_runs(config, LEXICON_RUNS), route=LEXICON_ROUTES)
 
 rule import_attr:
@@ -141,9 +127,7 @@ rule attribute:
     run:
         r = rundef(wildcards)
         out = f"results/{wildcards.run}/attr"
-        with gpu_lease(GPU_LOCKS, leave_free=1, wait_s=GPU_WAIT_S) as uuid:
-            run_body(out, attr_argv(r, out),
-                     env={"CUDA_VISIBLE_DEVICES": uuid, **COMPUTE_THREADS})
+        run_body(out, attr_argv(r, out), env=COMPUTE_THREADS)
 
 rule attribute_sharded:
     """One shard of a full-scale attribution: its own stage dir, its own card."""
@@ -156,9 +140,7 @@ rule attribute_sharded:
         r = rundef(wildcards)
         i = int(wildcards.i)
         out = f"results/{wildcards.run}/attr_shards/shard_{i}"
-        with gpu_lease(GPU_LOCKS, leave_free=1, wait_s=GPU_WAIT_S) as uuid:
-            run_body(out, attr_argv(r, out, shard_i=i),
-                     env={"CUDA_VISIBLE_DEVICES": uuid, **COMPUTE_THREADS})
+        run_body(out, attr_argv(r, out, shard_i=i), env=COMPUTE_THREADS)
 
 rule merge_shards:
     """Concatenate the shards in shard order into the one attr/ohe/regions triple
@@ -217,8 +199,7 @@ rule call_hits:
                 "-r", f"{reg_dir}/regions.npz", "-m", f"{mod_dir}/modisco.h5",
                 "-o", out, "-t", str(f["threshold"]), "-l", str(f["alpha"]),
                 "-b", str(f["batch"])]
-        with gpu_lease(GPU_LOCKS, leave_free=1, wait_s=GPU_WAIT_S) as uuid:
-            run_body(out, argv, env={"CUDA_VISIBLE_DEVICES": uuid})
+        run_body(out, argv)
 
 rule call_hits_v041:
     """The same regions.npz and modisco.h5, called by finemo 0.41 instead of 0.30.
@@ -238,16 +219,9 @@ rule call_hits_v041:
                 "-r", f"{reg_dir}/regions.npz", "-m", f"{mod_dir}/modisco.h5",
                 "-o", out, "-t", str(f["threshold"]), "-l", str(f["alpha"]),
                 "-b", str(f["batch"])]
-        # Lease a card only if this finemo's torch can reach one. Measured on this
-        # node it cannot (torch 2.13.0+cu130 vs driver 555.42.06), and leasing
-        # anyway squatted a GPU for 65 min of pure CPU work while an attribution
-        # shard sat stopped behind it. The runtime fact is recorded either way.
-        sees_cuda = env_sees_cuda(f"{ENV_ALT}/bin/python")
-        lease = (gpu_lease(GPU_LOCKS, leave_free=1, wait_s=GPU_WAIT_S) if sees_cuda
-                 else contextlib.nullcontext(None))
-        with lease as uuid:
-            run_body(out, argv,
-                     env={"CUDA_VISIBLE_DEVICES": uuid} if uuid else None)
+        # Note: this env's torch cannot reach a GPU on this node (torch 2.13.0+cu130
+        # vs driver 555.42.06) -- finemo warns and runs on the CPU. Slower, same hits.
+        run_body(out, argv)
 
 rule call_hits_lexicon:
     """Hit calling against an EXTERNAL lexicon (run_finemo.sh's gw/mmv routes).
@@ -272,79 +246,4 @@ rule call_hits_lexicon:
                 "-r", f"{reg_dir}/regions.npz", "-m", lex,
                 "-o", out, "-t", str(f["threshold"]), "-l", str(f["alpha"]),
                 "-b", str(batch)]
-        with gpu_lease(GPU_LOCKS, leave_free=1, wait_s=GPU_WAIT_S) as uuid:
-            run_body(out, argv, env={"CUDA_VISIBLE_DEVICES": uuid})
-
-rule equivalence_attr:
-    input: ATTR_FILES
-    output: "results/{run}/equivalence/attr_report.json"
-    wildcard_constraints: run="|".join(COMPUTED) if COMPUTED else "$^"
-    run:
-        from motifline.equivalence import compare_attr
-        r = rundef(wildcards)
-        os.makedirs(f"results/{wildcards.run}/equivalence", exist_ok=True)
-        rep = compare_attr(f"results/{wildcards.run}/attr", r["old_attr"],
-                           r["old_regions"], r["head"], output[0])
-        print(json.dumps(rep, indent=2))
-
-rule equivalence_modisco:
-    """Level-2 consistency report: new lexicon vs the archived modisco.h5 (no gate)."""
-    input: new="results/{run}/modisco/modisco.h5"
-    output: "results/{run}/equivalence/modisco_report.json"
-    wildcard_constraints: run=_alt(ARCHIVE_COMPARED)
-    run:
-        from motifline.equivalence import compare_modisco
-        r = rundef(wildcards)
-        os.makedirs(f"results/{wildcards.run}/equivalence", exist_ok=True)
-        rep = compare_modisco(input.new, r["old_modisco"], output[0])
-        print(json.dumps({k: v for k, v in rep.items() if k != "per_old_pattern"}, indent=2))
-
-rule equivalence_hits:
-    """Level-3 consistency report: new hits vs the archived finemo hits (no gate).
-
-    Joined on CWM identity, not on motif name: MoDISco names patterns by rank, so
-    two lexicons of different sizes reuse the same names for different motifs.
-    """
-    input: new="results/{run}/hits/hits.tsv",
-           modisco_report="results/{run}/equivalence/modisco_report.json"
-    output: "results/{run}/equivalence/hits_report.json"
-    wildcard_constraints: run=_alt(ARCHIVE_COMPARED)
-    run:
-        from motifline.equivalence import compare_hits, identity_map_from_modisco_report
-        r = rundef(wildcards)
-        os.makedirs(f"results/{wildcards.run}/equivalence", exist_ok=True)
-        imap = identity_map_from_modisco_report(input.modisco_report)
-        rep = compare_hits(input.new, r["old_hits"], output[0], identity_map=imap)
-        print(json.dumps({k: v for k, v in rep.items() if k != "per_motif_counts"}, indent=2))
-
-rule equivalence_hits_v041:
-    """0.41's hits against 0.30's, same regions and same lexicon.
-
-    Joined on motif_name and NOT through a CWM identity map: both sides scored
-    the identical modisco.h5, so the names denote the same motifs by construction
-    and any remapping here would only be able to hide a difference.
-    """
-    input: new="results/{run}/hits_v041/hits.tsv", old="results/{run}/hits/hits.tsv"
-    output: "results/{run}/equivalence/hits_v041_report.json"
-    wildcard_constraints: run=_alt(CROSS_VERSION)
-    run:
-        from motifline.equivalence import compare_hits
-        os.makedirs(f"results/{wildcards.run}/equivalence", exist_ok=True)
-        rep = compare_hits(input.new, input.old, output[0])
-        print(json.dumps({k: v for k, v in rep.items() if k != "per_motif_counts"}, indent=2))
-
-rule equivalence_hits_lexicon:
-    """External-lexicon hits against the archived hits for the same context+route.
-
-    Also a motif_name join, for the same reason: `-m` pointed both runs at one
-    lexicon file, so the pattern names are shared rather than rank-local.
-    """
-    input: new="results/{run}/hits_lexicon_{route}/hits.tsv"
-    output: "results/{run}/equivalence/hits_lexicon_{route}_report.json"
-    wildcard_constraints: run=_alt(LEXICON_RUNS), route=_alt(LEXICON_ROUTES)
-    run:
-        from motifline.equivalence import compare_hits
-        r = rundef(wildcards)
-        os.makedirs(f"results/{wildcards.run}/equivalence", exist_ok=True)
-        rep = compare_hits(input.new, r["lexicon_hits"][wildcards.route], output[0])
-        print(json.dumps({k: v for k, v in rep.items() if k != "per_motif_counts"}, indent=2))
+        run_body(out, argv)
