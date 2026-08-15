@@ -1,13 +1,12 @@
 ---
 name: motifline
-description: How to drive and read the motifline pipeline (attribution -> MoDISco -> FiNeMo) and how to respond when a stage REFUSES. Use when running or resuming a motifline rule, adding a new run to config/default.yaml, adopting an archived interpret_*_par_hyp directory, reading a stage's params/provenance/run_status/guard_outcomes before trusting a number from results/, or when a stage exits REFUSED and you are about to work around a guard.
+description: How to drive the motifline pipeline (attribution -> MoDISco -> FiNeMo). Use when running or resuming a motifline rule, adding a new run to config/default.yaml, adopting an archived interpret_*_par_hyp directory, or reading a result out of results/.
 ---
 
 # motifline
 
-A Snakemake pipeline from model attributions to MoDISco motifs to FiNeMo hits,
-where every stage directory carries its own record and a violated contract
-produces a **REFUSED** stage instead of a result.
+A Snakemake pipeline from model attributions to MoDISco motifs to FiNeMo hits.
+Each stage directory holds only the files that stage produces.
 
 Repo: `<KANT_ROOT>/motifline`.
 This file explains **when to use which rule** and **how to read what came out**.
@@ -20,13 +19,13 @@ actually been run and what came out is `docs/RUNS.md`.
 
 | layer | interpreter | holds |
 |---|---|---|
-| orchestration | `envs/motifline` (py3.12) | snakemake, motiflex, `motifline.*` |
+| orchestration | `envs/motifline` (py3.12) | snakemake, `motifline.*` |
 | compute | `envs/chrombpnet_local` (py3.10) | torch, chrombpnet, tangermeme, modisco-lite, **finemo 0.30** |
 | comparison only | `envs/mmv_verify` (py3.12) | **finemo 0.41**, used by `call_hits_v041` and nothing else |
 
 Stage bodies under `src/motifline/steps/` run in the compute env and must never
-`import motiflex` or `import motifline`; they take every site path as an
-argument. Anything that reads a stage record runs in the orchestration env.
+`import motifline`; they take every site path as an argument. The Snakefile and
+the equivalence reports run in the orchestration env.
 
 ## Standard invocation
 
@@ -37,16 +36,13 @@ envs/motifline/bin/snakemake --rerun-triggers mtime -j <N> --resources gpu=<G> -
 
 **`--rerun-triggers mtime` is not optional cosmetics.** Without it snakemake
 also reruns on its *code* trigger: a rule's `run:` block here only assembles an
-argv and a params dict, so editing it (adding a shard argument, recording one
-more field) changes snakemake's code hash while changing nothing about the
-artifact. On this tree a bare `snakemake -n` therefore proposes to recompute
-finished attributions and hit calls; with `--rerun-triggers mtime` it says
-`Nothing to be done`. The reproducibility record that matters is the per-stage
-`params.json` + `provenance.json`, which record the argv actually executed and
-the sha256 of every input — not snakemake's metadata. Do **not** reach for
-`snakemake --cleanup-metadata` instead: it deletes the trigger information
-per output file and has to be repeated after every edit, whereas the flag is one
-documented decision.
+argv, so editing it (adding a shard argument, changing a flag's spelling)
+changes snakemake's code hash while changing nothing about the artifact. On this
+tree a bare `snakemake -n` therefore proposes to recompute finished attributions
+and hit calls; with `--rerun-triggers mtime` it says `Nothing to be done`. Do
+**not** reach for `snakemake --cleanup-metadata` instead: it deletes the trigger
+information per output file and has to be repeated after every edit, whereas the
+flag is one documented decision.
 
 ## Which rule to use
 
@@ -108,7 +104,7 @@ runs:
     #                in_window: 16384
     head: null                 # int for a slice run, null for everything
     n_shards: 4                # present => sharded attribution, one GPU each
-    rows: 33917                # expected row count; a drift refuses the stage
+    rows: 33917                # expected row count; a drift fails the stage
     # --- adopted attribution (mutually exclusive with the block above) ---
     adopt_from:  /abs/path/interpret_cbp_par_hyp
     adopt_peaks: peaks.bed     # file inside adopt_from; 4-col AG beds are expanded
@@ -128,65 +124,24 @@ runs:
     cancelled_note: results/<run>/CANCELLED.md
 ```
 
-The canonical parameter block (`modisco:`, `finemo:`, `lexicons:`,
-`cross_version:`) is **shared by every run** and holds each tool's official
+The canonical parameter block (`modisco:`, `finemo:`, `lexicons:`) is
+**shared by every run** and holds each tool's official
 default unless `docs/PARAMS_AUDIT.md` records a technical reason. Do not add a
 per-run override to make a comparison come out nicer; that turns a report into a
 result. If a run genuinely needs a different value, change it in the shared
 block and add the audit row.
 
-## Reading a stage: the four files
+## Reading a stage
 
-Every stage directory holds its outputs plus:
+A stage directory holds only the files that stage produces — see
+`docs/ARTIFACTS.md` for the file list, shapes and dtypes of each one. There is
+no record file to consult: a rule either finishes and leaves its outputs, or it
+exits non-zero and snakemake stops. If a stage crashed part way through, its
+directory can still hold partial output (AG's `_chunks_<i>/` checkpoints in
+particular), so a rerun of the target, not the presence of files, is what tells
+you the stage is finished.
 
-| file | what it is |
-|---|---|
-| `params.json` | a **list**, one entry appended per attempt, written *before* the body |
-| `provenance.json` | a list of records: the exact argv, input sha256s, seed, software versions |
-| `run_status.json` | the last attempt's outcome, written *last* |
-| `guard_outcomes.json` | every guard that ran, with subject, verdict and detail |
-
-Read them in this order:
-
-1. **`run_status.json.status`.** `SUCCESS` is the only value that lets you trust
-   the artifacts next to it. `REFUSED` means a guard failed and **the body never
-   ran**. `CRASHED` means the body ran and exited non-zero.
-2. **`run_status.json.artifacts_are_from`.** On a failed attempt the outputs in
-   the directory may still be from an *earlier* successful run, so this field
-   carries that run's whole record (`status`, `command`, `finished_utc`,
-   `provenance_records`). If it reads `NO_SUCCESSFUL_RUN_RECORDED`, there is no
-   trustworthy artifact in that directory — whatever files are present are
-   partial output or checkpoints.
-3. **`params.json` — join, do not take the last entry.** `params.json` grows by
-   one entry per attempt, so the last entry belongs to the last *attempt*, which
-   may have failed. The entry that belongs to the artifacts is
-   `params[artifacts_are_from.provenance_records - 1]`; that is exactly what
-   `motifline.contracts.params_of_success(stage_dir)` returns, and what every
-   guard that inspects an upstream stage uses. Taking `params[-1]` is how a
-   number ends up attributed to a run that did not produce it.
-
-A number quoted from `results/` without the stage that produced it being SUCCESS
-is not a result. Cite the file.
-
-## When a stage is REFUSED
-
-A refusal is a statement that the thing you were about to compute would not have
-meant what it looks like. Read `guard_outcomes.json` for the failing `guard_id`
-and its `detail`, then:
-
-| guard | means | fix | never |
-|---|---|---|---|
-| `upstream_success` | the input stage's last run is not SUCCESS (or has no readable `run_status.json`) | rerun the upstream stage until it is SUCCESS; if it CRASHED, read its log and fix the cause | do not hand-edit a `run_status.json` to SUCCESS, and do not point the stage at the upstream's leftover files directly |
-| `attr_is_hypothetical` | the attribution stage did not record `hypothetical: true` | re-attribute with `--hypothetical`; project canon is that MoDISco/FiNeMo consume hypothetical scores | do not set `hypothetical: true` in params by hand, and do not feed actual-score attributions "just to see" — the resulting motifs are not comparable to anything else in this project |
-| `hyp_flags_match` | the hits' attributions and the lexicon's attributions disagree on hyp-vs-act | rebuild whichever side is wrong so both are hypothetical | do not mix; a hit called with one convention against a CWM built with the other is a number with no referent |
-| `rows_and_width_match` | `attr.npy`, `ohe.npy` and `regions.bed` disagree on row count, or the width is not the run's declared width | find the real cause — a partial merge, the wrong `peaks.bed`, an AG crop that did not happen, a `rows:` value that does not match the archive | do not truncate one array to match another, and do not relax `rows:`/`crop:` in config to whatever the files happen to have |
-| `finemo_version_matches` | the installed finemo differs from the one recorded by the stage that extracted the regions | re-extract the regions with the finemo you intend to call hits with, so both halves come from one version | do not call hits across versions here — that experiment already has its own stage (`call_hits_v041`), which replaces this guard with `recorded_finemo_version_is` + `finemo_version_declared` so the pairing stays checked on both sides |
-| `lexicon_exists` | an external lexicon path does not resolve to a file | fix the route in `config.lexicons.routes`, or the run's `lexicon_model` | do not fall back to the run's own `modisco.h5` — the route is the experiment |
-
-The general rule: **a guard is repaired upstream, never satisfied downstream.**
-Editing a record, relaxing an expectation to match broken data, or deleting a
-guard from the rule are all the same move, and all three destroy the only reason
-to believe the rest of the tree.
+When quoting a number out of `results/`, name the file it came from.
 
 ## GPU discipline
 

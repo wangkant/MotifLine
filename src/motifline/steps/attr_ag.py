@@ -15,7 +15,7 @@ AG runs for tens of hours, so a kill must cost at most one chunk. The two compos
 shard i writes ``_chunks_<i>/`` and then ``attr_<i>.npy``/``ohe_<i>.npy``/``regions_<i>.bed``.
 
 stdlib + numpy/pandas/torch/pyfaidx + alphagenome-pytorch + chrombpnet only; this file must
-never import motiflex or motifline. Site paths arrive as --ag_src/--chrombpnet_src, never
+never import motifline. Site paths arrive as --ag_src/--chrombpnet_src, never
 hardcoded. argparse runs before every heavy import so --help works anywhere.
 """
 import argparse

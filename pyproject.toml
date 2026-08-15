@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "motifline"
 version = "0.1.0.dev0"
-description = "Audited attribution->MoDISco->FiNeMo->motiflex pipeline"
+description = "Snakemake attribution->MoDISco->FiNeMo pipeline"
 requires-python = ">=3.11"
 dependencies = ["numpy", "pandas", "snakemake>=8"]
 

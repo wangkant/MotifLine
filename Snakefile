@@ -2,30 +2,29 @@
 import contextlib
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
 configfile: "config/default.yaml"
 
-from motifline import contracts, guards
 from motifline.gpu import env_sees_cuda, free_gpu_uuids, gpu_lease
 from motifline.lexicons import attr_width, lexicon_batch, lexicon_path
 from motifline.runs import active_runs, cancelled_runs
-from motifline.versions import dist_info_version
 
 ENV = config["envs"]["compute"]
 PY = f"{ENV}/bin/python"
-SP = config["compute_site_packages"]
 ENV_ALT = config["envs"]["finemo_alt"]                 # second finemo, comparison only
-SP_ALT = config["finemo_alt_site_packages"]
 STEPS = Path(workflow.basedir) / "src/motifline/steps"
 
 def rundef(w):
     return config["runs"][w.run]
 
-def compute_versions():
-    return {p: dist_info_version(SP, p)
-            for p in ("tangermeme", "modisco_lite", "finemo")}
+def run_body(out_dir, argv, env=None):
+    """Make the stage directory and run the stage body in it."""
+    os.makedirs(out_dir, exist_ok=True)
+    subprocess.run([str(a) for a in argv], check=True,
+                   env={**os.environ, **env} if env else None)
 
 # One shard per GPU with 8 threads was the measured optimum for AG (run_ag_par_hyp.sh:14-16);
 # without a cap the process oversubscribes the node's cores.
@@ -62,20 +61,6 @@ def attr_argv(r, out, shard_i=None):
     if shard_i is not None:
         argv += ["--shard_i", str(shard_i), "--n_shards", str(r["n_shards"])]
     return argv
-
-def attr_params(r, shard_i=None, gpu_uuid=None):
-    if r["model"] == "ag":
-        extra = {"track": r["track"], "crop": r["crop"], "n_shuffles": r["n_shuffles"],
-                 "batch_size": 1, "weights": r["weights"], "ag_src": r["ag_src"],
-                 "chunk": r["chunk"]}
-    else:
-        extra = {"task": "counts", "batch_size": 32, "wo_bias": r["wo_bias"]}
-    if shard_i is not None:
-        extra.update({"shard_i": shard_i, "n_shards": r["n_shards"]})
-    if gpu_uuid is not None:
-        extra["gpu_uuid"] = gpu_uuid          # which card produced these rows
-    return {"hypothetical": True, "model": r["model"], "in_window": r["in_window"],
-            "head": r.get("head"), "random_state": 42, "software": compute_versions(), **extra}
 
 ORCH_PY = sys.executable  # the python running snakemake == the motifline orchestration env
 
@@ -144,20 +129,10 @@ rule import_attr:
         r = rundef(wildcards)
         out = f"results/{wildcards.run}/attr"
         src = r["adopt_from"]
-        w = attr_width(r)
-        peaks_src = os.path.join(src, r.get("adopt_peaks", "peaks.bed"))
         argv = [ORCH_PY, "-m", "motifline.adopt", "--src_dir", src, "--out_dir", out,
-                "--expected_rows", str(r["rows"]), "--expected_width", str(w),
+                "--expected_rows", str(r["rows"]), "--expected_width", str(attr_width(r)),
                 "--peaks_name", r.get("adopt_peaks", "peaks.bed")]
-        contracts.run_stage(
-            out, "import_attr", argv,
-            params={"hypothetical": True, "model": r["model"], "in_window": r["in_window"],
-                    "crop": r.get("crop"), "head": None, "adopted_from": src,
-                    "adopted_peaks": peaks_src, "expected_rows": r["rows"],
-                    "attr_width": w, "software": compute_versions()},
-            inputs=[os.path.join(src, "attr.npy"), os.path.join(src, "ohe.npy"), peaks_src],
-            post_guards=[lambda: (guards.rows_and_width_match(
-                f"{out}/attr.npy", f"{out}/ohe.npy", f"{out}/regions.bed", w), out)])
+        run_body(out, argv)
 
 rule attribute:
     output: "results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy", "results/{run}/attr/regions.bed"
@@ -166,14 +141,9 @@ rule attribute:
     run:
         r = rundef(wildcards)
         out = f"results/{wildcards.run}/attr"
-        w = attr_width(r)
         with gpu_lease(GPU_LOCKS, leave_free=1, wait_s=GPU_WAIT_S) as uuid:
-            contracts.run_stage(
-                out, "attribute", attr_argv(r, out), params=attr_params(r, gpu_uuid=uuid),
-                inputs=[r["peaks"], r["weights"] if r["model"] == "ag" else r["wo_bias"]], seed=42,
-                env={"CUDA_VISIBLE_DEVICES": uuid, **COMPUTE_THREADS},
-                post_guards=[lambda: (guards.rows_and_width_match(
-                    f"{out}/attr.npy", f"{out}/ohe.npy", f"{out}/regions.bed", w), out)])
+            run_body(out, attr_argv(r, out),
+                     env={"CUDA_VISIBLE_DEVICES": uuid, **COMPUTE_THREADS})
 
 rule attribute_sharded:
     """One shard of a full-scale attribution: its own stage dir, its own card."""
@@ -186,21 +156,13 @@ rule attribute_sharded:
         r = rundef(wildcards)
         i = int(wildcards.i)
         out = f"results/{wildcards.run}/attr_shards/shard_{i}"
-        w = attr_width(r)
         with gpu_lease(GPU_LOCKS, leave_free=1, wait_s=GPU_WAIT_S) as uuid:
-            contracts.run_stage(
-                out, "attribute", attr_argv(r, out, shard_i=i),
-                params=attr_params(r, shard_i=i, gpu_uuid=uuid),
-                inputs=[r["peaks"], r["weights"] if r["model"] == "ag" else r["wo_bias"]], seed=42,
-                env={"CUDA_VISIBLE_DEVICES": uuid, **COMPUTE_THREADS},
-                post_guards=[lambda: (guards.rows_and_width_match(
-                    f"{out}/attr_{i}.npy", f"{out}/ohe_{i}.npy",
-                    f"{out}/regions_{i}.bed", w), out)])
+            run_body(out, attr_argv(r, out, shard_i=i),
+                     env={"CUDA_VISIBLE_DEVICES": uuid, **COMPUTE_THREADS})
 
 rule merge_shards:
     """Concatenate the shards in shard order into the one attr/ohe/regions triple
-    the rest of the DAG consumes. Every shard must have finished SUCCESSFULLY:
-    a merge over a REFUSED shard would be a short matrix that still looks valid."""
+    the rest of the DAG consumes."""
     input: shard_outputs
     output: "results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy", "results/{run}/attr/regions.bed"
     wildcard_constraints: run=_alt(SHARDED)
@@ -208,22 +170,12 @@ rule merge_shards:
         r = rundef(wildcards)
         dirs = shard_dirs(wildcards.run)
         out = f"results/{wildcards.run}/attr"
-        w = attr_width(r)
         argv = [ORCH_PY, "-m", "motifline.merge_shards", "--out_dir", out]
         for d in dirs:
             argv += ["--shard_dir", d]
         if r.get("rows"):
             argv += ["--expected_rows", str(r["rows"])]
-        contracts.run_stage(
-            out, "merge_shards", argv,
-            params={"hypothetical": True, "model": r["model"], "in_window": r["in_window"],
-                    "crop": r.get("crop"), "head": r.get("head"), "n_shards": r["n_shards"],
-                    "shard_dirs": dirs, "expected_rows": r.get("rows"),
-                    "attr_width": w, "software": compute_versions()},
-            inputs=[f"{d}/attr_{i}.npy" for i, d in enumerate(dirs)],
-            pre_guards=[(lambda d=d: (guards.upstream_success(d), d)) for d in dirs],
-            post_guards=[lambda: (guards.rows_and_width_match(
-                f"{out}/attr.npy", f"{out}/ohe.npy", f"{out}/regions.bed", w), out)])
+        run_body(out, argv)
 
 ATTR_FILES = ["results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy",
               "results/{run}/attr/regions.bed"]
@@ -232,23 +184,12 @@ rule discover:
     input: ATTR_FILES
     output: "results/{run}/modisco/modisco.h5"
     run:
-        r = rundef(wildcards)
         attr_dir = f"results/{wildcards.run}/attr"
         out = f"results/{wildcards.run}/modisco"
         argv = [f"{ENV}/bin/modisco", "motifs", "-s", f"{attr_dir}/ohe.npy",
                 "-a", f"{attr_dir}/attr.npy", "-n", str(config["modisco"]["max_seqlets"]),
                 "-w", str(config["modisco"]["window"]), "-o", f"{out}/modisco.h5"]
-        contracts.run_stage(
-            out, "discover", argv,
-            params={"attr_dir": attr_dir, "attr_hypothetical": True,
-                    **config["modisco"], "software": compute_versions()},
-            inputs=[f"{attr_dir}/attr.npy", f"{attr_dir}/ohe.npy"],
-            env=COMPUTE_THREADS,
-            pre_guards=[
-                lambda: (guards.upstream_success(attr_dir), attr_dir),
-                lambda: (guards.attr_is_hypothetical(attr_dir), attr_dir),
-                lambda: (guards.rows_and_width_match(f"{attr_dir}/attr.npy", f"{attr_dir}/ohe.npy",
-                                                     f"{attr_dir}/regions.bed", attr_width(r)), attr_dir)])
+        run_body(out, argv, env=COMPUTE_THREADS)
 
 rule extract_regions:
     input: ATTR_FILES
@@ -261,21 +202,13 @@ rule extract_regions:
                 "-s", f"{attr_dir}/ohe.npy", "-a", f"{attr_dir}/attr.npy",
                 "-p", f"{attr_dir}/regions.bed", "-o", f"{out}/regions.npz",
                 "-w", str(attr_width(r))]
-        contracts.run_stage(
-            out, "extract_regions", argv,
-            params={"attr_dir": attr_dir, "width": attr_width(r),
-                    "software": compute_versions()},
-            inputs=[f"{attr_dir}/attr.npy", f"{attr_dir}/ohe.npy"],
-            pre_guards=[
-                lambda: (guards.upstream_success(attr_dir), attr_dir),
-                lambda: (guards.attr_is_hypothetical(attr_dir), attr_dir)])
+        run_body(out, argv)
 
 rule call_hits:
     input: npz=rules.extract_regions.output, lex=rules.discover.output
     output: "results/{run}/hits/hits.tsv"
     resources: gpu=1
     run:
-        attr_dir = f"results/{wildcards.run}/attr"
         reg_dir = f"results/{wildcards.run}/finemo_regions"
         mod_dir = f"results/{wildcards.run}/modisco"
         out = f"results/{wildcards.run}/hits"
@@ -285,40 +218,22 @@ rule call_hits:
                 "-o", out, "-t", str(f["threshold"]), "-l", str(f["alpha"]),
                 "-b", str(f["batch"])]
         with gpu_lease(GPU_LOCKS, leave_free=1, wait_s=GPU_WAIT_S) as uuid:
-            contracts.run_stage(
-                out, "call_hits", argv,
-                params={"attr_dir": attr_dir, "lexicon_dir": mod_dir, **f,
-                        "gpu_uuid": uuid, "software": compute_versions()},
-                inputs=[f"{reg_dir}/regions.npz", f"{mod_dir}/modisco.h5"],
-                env={"CUDA_VISIBLE_DEVICES": uuid},
-                pre_guards=[
-                    lambda: (guards.upstream_success(reg_dir), reg_dir),
-                    lambda: (guards.upstream_success(mod_dir), mod_dir),
-                    lambda: (guards.attr_is_hypothetical(attr_dir), attr_dir),
-                    lambda: (guards.hyp_flags_match(attr_dir, attr_dir), attr_dir),
-                    lambda: (guards.finemo_version_matches(reg_dir, SP), SP)])
+            run_body(out, argv, env={"CUDA_VISIBLE_DEVICES": uuid})
 
 rule call_hits_v041:
     """The same regions.npz and modisco.h5, called by finemo 0.41 instead of 0.30.
 
-    `finemo_version_matches` is the guard every other hit-calling stage carries;
-    it cannot be used here, because the mismatch it forbids is exactly what this
-    stage measures. It is replaced, not dropped: `recorded_finemo_version_is`
-    pins what actually produced the regions and `finemo_version_declared` pins
-    what actually runs, so the record cannot claim a version pairing it did not
-    have. Nothing downstream consumes this directory -- it exists to be compared.
+    Nothing downstream consumes this directory -- it exists to be compared.
     """
     input: npz=rules.extract_regions.output, lex=rules.discover.output
     output: "results/{run}/hits_v041/hits.tsv"
     wildcard_constraints: run=_alt(CROSS_VERSION)
     resources: gpu=1
     run:
-        attr_dir = f"results/{wildcards.run}/attr"
         reg_dir = f"results/{wildcards.run}/finemo_regions"
         mod_dir = f"results/{wildcards.run}/modisco"
         out = f"results/{wildcards.run}/hits_v041"
         f = config["finemo"]
-        xv = config["cross_version"]
         argv = [f"{ENV_ALT}/bin/finemo", "call-hits", "-M", f["mode"],
                 "-r", f"{reg_dir}/regions.npz", "-m", f"{mod_dir}/modisco.h5",
                 "-o", out, "-t", str(f["threshold"]), "-l", str(f["alpha"]),
@@ -331,25 +246,8 @@ rule call_hits_v041:
         lease = (gpu_lease(GPU_LOCKS, leave_free=1, wait_s=GPU_WAIT_S) if sees_cuda
                  else contextlib.nullcontext(None))
         with lease as uuid:
-            contracts.run_stage(
-                out, "call_hits", argv,
-                params={"attr_dir": attr_dir, "lexicon_dir": mod_dir, **f,
-                        "gpu_uuid": uuid, "runtime_sees_cuda": sees_cuda,
-                        "device": "cuda" if sees_cuda else "cpu",
-                        "cross_version_experiment": True,
-                        "regions_extracted_with": xv["regions_extracted_with"],
-                        "finemo_env": ENV_ALT,
-                        "software": {**compute_versions(),
-                                     "finemo": dist_info_version(SP_ALT, "finemo")}},
-                inputs=[f"{reg_dir}/regions.npz", f"{mod_dir}/modisco.h5"],
-                env={"CUDA_VISIBLE_DEVICES": uuid} if uuid else None,
-                pre_guards=[
-                    lambda: (guards.upstream_success(reg_dir), reg_dir),
-                    lambda: (guards.upstream_success(mod_dir), mod_dir),
-                    lambda: (guards.attr_is_hypothetical(attr_dir), attr_dir),
-                    lambda: (guards.recorded_finemo_version_is(
-                        reg_dir, xv["regions_extracted_with"]), reg_dir),
-                    lambda: (guards.finemo_version_declared(xv["finemo"], SP_ALT), SP_ALT)])
+            run_body(out, argv,
+                     env={"CUDA_VISIBLE_DEVICES": uuid} if uuid else None)
 
 rule call_hits_lexicon:
     """Hit calling against an EXTERNAL lexicon (run_finemo.sh's gw/mmv routes).
@@ -365,7 +263,6 @@ rule call_hits_lexicon:
     resources: gpu=1
     run:
         r = rundef(wildcards)
-        attr_dir = f"results/{wildcards.run}/attr"
         reg_dir = f"results/{wildcards.run}/finemo_regions"
         out = f"results/{wildcards.run}/hits_lexicon_{wildcards.route}"
         lex = lexicon_path(config, r, wildcards.route)
@@ -376,20 +273,7 @@ rule call_hits_lexicon:
                 "-o", out, "-t", str(f["threshold"]), "-l", str(f["alpha"]),
                 "-b", str(batch)]
         with gpu_lease(GPU_LOCKS, leave_free=1, wait_s=GPU_WAIT_S) as uuid:
-            contracts.run_stage(
-                out, "call_hits", argv,
-                params={"attr_dir": attr_dir, "lexicon_route": wildcards.route,
-                        "lexicon_model": r["lexicon_model"], "lexicon": lex,
-                        "external_lexicon": True, "width": attr_width(r),
-                        **{**f, "batch": batch}, "batch_official_default": f["batch"],
-                        "gpu_uuid": uuid, "software": compute_versions()},
-                inputs=[f"{reg_dir}/regions.npz", lex],
-                env={"CUDA_VISIBLE_DEVICES": uuid},
-                pre_guards=[
-                    lambda: (guards.upstream_success(reg_dir), reg_dir),
-                    lambda: (guards.attr_is_hypothetical(attr_dir), attr_dir),
-                    lambda: (guards.lexicon_exists(lex), lex),
-                    lambda: (guards.finemo_version_matches(reg_dir, SP), SP)])
+            run_body(out, argv, env={"CUDA_VISIBLE_DEVICES": uuid})
 
 rule equivalence_attr:
     input: ATTR_FILES

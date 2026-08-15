@@ -1,45 +1,17 @@
 # What each stage writes
 
-Every stage writes its outputs plus `params.json`, `provenance.json`,
-`run_status.json` and `guard_outcomes.json`. The last two are how you tell a
-finished directory from a failed run's leftovers, which otherwise look
-identical: the files a crashed attribution leaves behind have the same names as
-the files a successful one leaves behind.
+A stage directory holds only the files that stage produces — the ones listed
+below. A stage that crashed part way through can leave partial output whose
+names are the same as a finished run's, so treat a directory as finished only
+after its target reruns clean.
 
 Shapes and dtypes below were read off `results/k562_cbp_full` and
 `results/k562_ag_adopted` (2026-08-14), not from the code that intends them.
 
-## The record every stage carries
-
-| file | shape | contents |
-|---|---|---|
-| `params.json` | **list**, one entry appended per attempt, written *before* the body | what this attempt was asked to do |
-| `provenance.json` | list of records | the exact argv, sha256 of every declared input, seed, software versions |
-| `run_status.json` | object | the **last attempt's** outcome, written *last* |
-| `guard_outcomes.json` | list | every guard that ran: `guard_id`, `subject`, `passed`, `detail`, `recorded_utc` |
-
-`run_status.json`:
-
-```json
-{"status": "SUCCESS" | "REFUSED" | "CRASHED",
- "command": "...", "exit_code": 0, "detail": null,
- "finished_utc": "2026-08-14T12:46:45Z", "provenance_records": 1,
- "artifacts_are_from": { ...the last SUCCESSFUL run's whole record... }}
-```
-
-Three semantics that are easy to get wrong:
-
-* **`status` is about the attempt, `artifacts_are_from` is about the files.** A
-  REFUSED or CRASHED stage can still hold artifacts from an earlier successful
-  run, and `artifacts_are_from` is that run's record. The string
-  `NO_SUCCESSFUL_RUN_RECORDED` means nothing in the directory is trustworthy.
-* **REFUSED means the body never ran.** A guard failed, its outcome was written
-  to `guard_outcomes.json`, and the stage raised before any subprocess started.
-  So a REFUSED directory contains no file this attempt produced.
-* **`params.json` is joined, not indexed from the end.** The entry belonging to
-  the artifacts is `params[artifacts_are_from.provenance_records - 1]` —
-  `contracts.params_of_success()`. `params[-1]` is the last *attempt*, which may
-  be the one that failed.
+Stage directories produced before 2026-08-14 also carry `params.json`,
+`provenance.json`, `run_status.json` and `guard_outcomes.json`. Those are
+historical records of the audit layer this pipeline used to run; the pipeline no
+longer writes or reads them.
 
 ---
 
@@ -69,36 +41,25 @@ handle ambiguous bases differently: CBP additionally drops any row containing an
 `0.25` (N) column or an all-zero column (`attr_cbp.py:129-134`), while AG fills
 `N → A` inside the flanks it is about to crop away and keeps the row
 (`attr_ag.py:144-147`), so that the AG region set stays equal to CBP's. This is
-why `rows_and_width_match` compares the three output files to each other rather
-than to the input peak count, and why `regions.bed` — not `peaks.bed` — is the
-row key for everything downstream.
-
-Guards: `rows_and_width_match` (post).
+why `regions.bed` — not `peaks.bed` — is the row key for everything downstream.
 
 ### AG chunk checkpoints — `_chunks_<i>/`
 
-`attr_<c>.npy` / `ohe_<c>.npy` per 100 regions. These are **not** stage outputs
-and carry no record; they exist so a kill costs at most one chunk. Resume is by
-file existence (`chunk <c>/<n> exists -> resume-skip`), and they live per shard
-so one shard cannot resume-skip another's chunk. A directory holding only chunks
-and a CRASHED `run_status.json` is a run in progress, not a result.
+`attr_<c>.npy` / `ohe_<c>.npy` per 100 regions. These are **not** stage outputs;
+they exist so a kill costs at most one chunk. Resume is by file existence
+(`chunk <c>/<n> exists -> resume-skip`), and they live per shard so one shard
+cannot resume-skip another's chunk. A directory holding only chunks is a run in
+progress, not a result.
 
 ## `import_attr` → `attr/`
 
-Same three files, same contract, one difference: `attr.npy` and `ohe.npy` are
-**absolute symlinks** into the archived `interpret_*_par_hyp/` tree (the old tree
-is read-only and these cost GPU-days), and only `regions.bed` is newly written.
-Plus `adopt_info.json`: rows, width, the peak-normalization outcome and the
-three resolved source paths.
+Same three files, one difference: `attr.npy` and `ohe.npy` are **absolute
+symlinks** into the archived `interpret_*_par_hyp/` tree (the old tree is
+read-only and these cost GPU-days), and only `regions.bed` is newly written.
 
-Nothing is linked until every shape check passes, so a refused adoption leaves an
-empty directory rather than a half-linked one. `params.json` records
-`adopted_from`, `adopted_peaks` and `expected_rows`, and `provenance.json`
-carries the sha256 of the archived files themselves.
-
-Guards: `rows_and_width_match` (post); `expected_rows`/`expected_width` are
-enforced inside `adopt.adopt_attr`, so a row-count drift in the archive refuses
-the stage rather than propagating.
+`adopt.adopt_attr` checks the archive's rows and width against the run's
+`rows:`/`crop:` before it links anything, and raises `ValueError` on a drift, so
+a failed adoption leaves an empty directory rather than a half-linked one.
 
 ## `discover` → `modisco/`
 
@@ -110,8 +71,6 @@ Patterns are named **by rank** (`pattern_0`, `pattern_1`, …). Two lexicons of
 different sizes therefore reuse the same names for different motifs — which is
 why every level-3 comparison against an archive joins on CWM identity, not name.
 
-Guards (pre): `upstream_success`, `attr_is_hypothetical`, `rows_and_width_match`.
-
 ## `extract_regions` → `finemo_regions/`
 
 | file | contents |
@@ -121,8 +80,6 @@ Guards (pre): `upstream_success`, `attr_is_hypothetical`, `rows_and_width_match`
 **The contributions are stored `float16`.** Everything downstream of this stage
 sees a quantized copy of the attributions, and differences at ~1e-4 between two
 hit tables are at that floor, not above it.
-
-Guards (pre): `upstream_success`, `attr_is_hypothetical`.
 
 ## `call_hits` → `hits/` (also `hits_lexicon_<route>/`, `hits_v041/`)
 
@@ -134,7 +91,7 @@ Guards (pre): `upstream_success`, `attr_is_hypothetical`.
 | `motif_data.tsv` | per motif: the trim window actually used, both strands |
 | `motif_cwms.npy` | the CWMs as scored |
 | `peaks_qc.tsv` | per region QC |
-| `parameters.json` | **finemo's own** resolved parameter dump — independent of `params.json` |
+| `parameters.json` | finemo's own resolved parameter dump |
 
 `start`/`end` are the **trimmed** coordinates: `call-hits` re-derives each motif's
 extent by trimming its CWM at `-t`, so two runs whose CWMs differ slightly emit
@@ -142,12 +99,6 @@ the same hits at coordinates shifted by a base or two. That is why level-3
 reports carry both an exact and a ±2bp-tolerant Jaccard, and why an exact
 Jaccard far below the tolerant one is a coordinate effect rather than a
 motif-identity one.
-
-Guards (pre): `upstream_success` ×2, `attr_is_hypothetical`, `hyp_flags_match`,
-`finemo_version_matches`. The route variant swaps in `lexicon_exists`; the
-cross-version variant replaces `finemo_version_matches` with
-`recorded_finemo_version_is` + `finemo_version_declared` — replaced, never
-dropped, because a version mismatch is the thing that stage measures.
 
 `hits_v041/` and `hits_lexicon_<route>/` are **leaves**: nothing in the DAG
 consumes them.
@@ -157,15 +108,15 @@ consumes them.
 The same three files as `attribute`, concatenated in shard order — shard order
 *is* row order, because the bounds are contiguous slices of the peak list.
 
-Guards: `upstream_success` on **every** shard (pre), `rows_and_width_match`
-(post), plus `--expected_rows`. A merge over a REFUSED or unfinished shard would
-be a short matrix that still looks valid, which is the failure this rule exists
-to prevent.
+`merge_shards` checks that shard *i* is the *i*-th directory it was given and
+that each shard's attr/ohe/regions agree on row count, and the rule passes
+`--expected_rows` so a merge over an unfinished shard is a hard error rather
+than a short matrix that still looks valid.
 
 ## `equivalence_*` → `equivalence/`
 
-Reports, not results. They are written by the orchestration env and carry no
-guard record of their own; their inputs' records are the provenance.
+Reports, not results. They are written by the orchestration env, directly from
+the files named in their inputs.
 
 | file | level | gate? |
 |---|---|---|

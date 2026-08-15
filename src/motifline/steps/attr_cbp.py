@@ -4,7 +4,7 @@
 Line-for-line the math of region_v3/k562/shap_shard.py, single-process:
 same model construction, get_seq, masks and _deep_lift_shap call, so its
 output is directly comparable to the archived attr.npy. stdlib+numpy+torch+
-chrombpnet only -- this file must never import motiflex or motifline.
+chrombpnet only -- this file must never import motifline.
 
 Full-scale runs shard the peak list (--shard_i/--n_shards, same linspace bounds
 as the archive) and write ``attr_<i>.npy``/``ohe_<i>.npy``/``regions_<i>.bed``;

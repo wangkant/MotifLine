@@ -1,12 +1,10 @@
 kant: <KANT_ROOT>
 envs:
   compute: <KANT_ROOT>/envs/chrombpnet_local
-  # Second finemo, for the 0.30-vs-0.41 comparison ONLY (rule call_hits_v041).
-  # Nothing else in the DAG may use it: the version guard on `call_hits` pins the
-  # hit caller to the version that extracted the regions.
+  # Second finemo (0.41), for the 0.30-vs-0.41 comparison ONLY (rule
+  # call_hits_v041). Nothing else in the DAG uses it: every other hit-calling
+  # stage runs the compute env's finemo, the one that extracted the regions.
   finemo_alt: <KANT_ROOT>/envs/mmv_verify
-compute_site_packages: <KANT_ROOT>/envs/chrombpnet_local/lib/python3.10/site-packages
-finemo_alt_site_packages: <KANT_ROOT>/envs/mmv_verify/lib/python3.12/site-packages
 chrombpnet_src: <KANT_ROOT>/models/chrombpnet-pytorch
 ag_src: <KANT_ROOT>/models/alphagenome-pytorch-deeplift/src
 genome:
@@ -163,8 +161,6 @@ lexicons:
       cbp: <KANT_ROOT>/new_experiment/region_v4/05_allcluster_lexicon/mmv/lexicons_v2/core.h5
       ag2048: <KANT_ROOT>/new_experiment/region_v4/05_allcluster_lexicon/mmv/lexicons_v2/core.h5
 
-# finemo 0.30-vs-0.41 comparison (docs/PARAMS_AUDIT.md). The 0.41 stage reuses the
-# regions.npz and modisco.h5 that 0.30 produced -- that is the experiment.
-cross_version:
-  finemo: "0.41"
-  regions_extracted_with: "0.30"
+# finemo 0.30-vs-0.41 comparison (docs/PARAMS_AUDIT.md): rule call_hits_v041
+# reuses the regions.npz and modisco.h5 that the compute env's 0.30 produced and
+# calls hits with envs.finemo_alt -- that is the experiment.

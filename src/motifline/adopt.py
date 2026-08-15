@@ -6,6 +6,9 @@ tree is read-only, so adoption links rather than copies: ``attr.npy`` and
 newly written. Nothing is written until every shape check passes, so a refused
 adoption leaves an empty stage directory rather than a half-linked one.
 
+Nothing is written until every shape check passes; a check that fails raises
+``ValueError`` and the stage directory is left as it was.
+
 ``normalize_peaks`` exists because the two archived peak formats disagree: the
 ChromBPNet side stores the 11-column ``load_region_df`` output while the AG side
 stores a 4-column ``chr/start/end/summit`` bed, and ``finemo
@@ -99,7 +102,6 @@ def main():
     a = ap.parse_args()
     info = adopt_attr(a.src_dir, a.out_dir, a.expected_rows, a.expected_width, a.peaks_name)
     print(json.dumps(info, indent=2), flush=True)
-    (Path(a.out_dir) / "adopt_info.json").write_text(json.dumps(info, indent=2) + "\n")
 
 
 if __name__ == "__main__":

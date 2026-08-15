@@ -10,7 +10,7 @@ on motifline's import path: the pipeline has to keep working when that tree is g
 import would silently re-bind the pipeline's math to a file nobody is versioning.
 
 This module is part of the COMPUTE layer (chrombpnet_local, py3.10): it must never import
-motiflex or motifline. It also does no sys.path manipulation of its own -- the caller
+motifline. It also does no sys.path manipulation of its own -- the caller
 (attr_ag.py) puts the alphagenome-pytorch-deeplift and chrombpnet-pytorch checkouts on
 sys.path before importing this module, so the site paths stay in config, not in code.
 """

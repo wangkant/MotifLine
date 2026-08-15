@@ -8,8 +8,8 @@ one directory twice, would produce a matrix whose rows no longer correspond to
 regions.bed, so the index in the filename is checked against the position in the
 list rather than trusted.
 
-Runs in the orchestration env (numpy only) so it can be driven by
-``contracts.run_stage`` like every other stage body.
+Runs in the orchestration env (numpy only), like every other stage body it is
+invoked as a subprocess by the Snakefile.
 """
 from __future__ import annotations
 import argparse

@@ -1,10 +1,9 @@
 # motifline
 
-Audited pipeline from attribution to MoDISco to FiNeMo: every stage directory
-carries its result alongside `provenance.json`, `params.json`, `run_status.json`
-and `guard_outcomes.json`, the orchestration layer (Python 3.12) stays separate
-from the compute layer (`chrombpnet_local`, Python 3.10), and a violated
-contract produces a **REFUSED** stage rather than a result.
+Snakemake pipeline from attribution to MoDISco to FiNeMo. Each stage directory
+holds only its result files; the orchestration layer (Python 3.12) stays
+separate from the compute layer (`chrombpnet_local`, Python 3.10), which is
+where every stage body actually runs.
 
 ## Architecture
 
@@ -13,14 +12,13 @@ config/default.yaml ──────── runs, canonical parameters, lexicon
         │
         ▼
    Snakefile (envs/motifline, py3.12)          orchestration layer
-        │   contracts.run_stage: params+provenance BEFORE the body,
-        │   run_status LAST; guards refuse before any subprocess starts
+        │   each rule assembles an argv and runs it as a subprocess
         │   gpu.gpu_lease: one fully-free card by UUID, one always left free
         │
         ├── attribute            ─┐
         ├── attribute_sharded ──► merge_shards ─┐   src/motifline/steps/*.py
         └── import_attr  (adopt archived attr)  │   (envs/chrombpnet_local, py3.10;
-                                                │    never import motifline/motiflex)
+                                                │    never import motifline)
                                     attr/  ─────┤
                                                 │
                     ┌───────────────────────────┴───────────────┐
@@ -57,21 +55,19 @@ cd <KANT_ROOT>/motifline
 ```
 
 **Always pass `--rerun-triggers mtime`.** A rule's `run:` block here only
-assembles an argv and a params dict, so editing it changes snakemake's *code*
-hash without changing anything about the artifact; without the flag a bare
-`snakemake` proposes to recompute finished attributions and hit calls. The
-reproducibility record that matters is each stage's own `params.json` +
-`provenance.json` (the exact argv, plus the sha256 of every input), not
-snakemake's metadata. `snakemake --cleanup-metadata` would suppress the same
-trigger by deleting information per output file and would have to be repeated
-after every edit; the flag is one documented decision instead.
+assembles an argv, so editing it changes snakemake's *code* hash without
+changing anything about the artifact; without the flag a bare `snakemake`
+proposes to recompute finished attributions and hit calls. `snakemake
+--cleanup-metadata` would suppress the same trigger by deleting information per
+output file and would have to be repeated after every edit; the flag is one
+documented decision instead.
 
 ## Where things are written down
 
 | file | what it answers |
 |---|---|
-| `skill/SKILL.md` | which rule to use, how to read a stage record, what to do when a stage REFUSES, GPU discipline |
-| `docs/ARTIFACTS.md` | what each stage writes: files, shapes, dtypes, the four-file semantics, per-stage guards |
+| `skill/SKILL.md` | which rule to use, how to add a run, GPU discipline |
+| `docs/ARTIFACTS.md` | what each stage writes: files, shapes, dtypes |
 | `docs/PARAMS_AUDIT.md` | every parameter vs its official source, and why each deviation exists (§13 = the canonical values on one page) |
 | `docs/RUNS.md` | what has actually been executed and what came out, every number named with its file |
 | `docs/FINAL_REPORT.md` | the project's end state: deliverables, all runs and their verdicts, known residuals |
