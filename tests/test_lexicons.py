@@ -6,7 +6,7 @@ pair must raise, not silently fall through to "no lexicon" and let finemo be
 called without `-m`.
 """
 import pytest
-from motifline.lexicons import LexiconRouteError, attr_width, lexicon_batch, lexicon_path
+from motifline.lexicons import LexiconRouteError, lexicon_batch, lexicon_path
 
 CFG = {
     "lexicons": {
@@ -42,8 +42,5 @@ def test_batch_is_the_documented_deviation_not_the_official_default():
         lexicon_batch({"lexicons": {"routes": {}}})
 
 
-def test_width_follows_the_model_not_the_route():
-    # width_for() in the shell: cbp 2114, ag2048 2048 -- the attribution window,
-    # which in motifline is the run's crop (AG) or in_window (CBP).
-    assert attr_width({"model": "cbp", "in_window": 2114}) == 2114
-    assert attr_width({"model": "ag", "in_window": 16384, "crop": 2048}) == 2048
+# The attribution width the routes are called with now lives in motifline.geometry;
+# see tests/test_geometry.py.

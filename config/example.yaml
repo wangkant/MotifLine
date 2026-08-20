@@ -164,3 +164,37 @@ lexicons:
 # finemo 0.30-vs-0.41 comparison (docs/PARAMS_AUDIT.md): rule call_hits_v041
 # reuses the regions.npz and modisco.h5 that the compute env's 0.30 produced and
 # calls hits with envs.finemo_alt -- that is the experiment.
+
+# Cross-model merges. What to merge is defined once (compendium.merges); how the
+# line FINISHES is motiflex (2026-08-17): every merge gets an annotated mlex tree,
+# and a merge that declares cut_height also gets a compiled medoid lexicon.
+# MotifCompendium remains the explicit-target comparison arm (rule merge_compendium),
+# which is the only consumer of the compendium tool block below.
+compendium:
+  env: /path/to/kant/envs/motifcompendium
+  src: /path/to/kant/models/MotifCompendium
+  algorithm: cpm_leiden
+  similarity_threshold: 0.9
+  seeds: [100, 200]
+  max_cpus: 16
+  use_gpu: false
+  cluster_within_posneg: true
+  quality_stats: true
+  merges:
+    # <name>:
+    #   cut_height: 0.05     # motiflex finish; omit -> tree only, nothing merged
+    #   region_width: 500    # MC arm only
+    #   db_yaml: /path/db.yaml   # optional precomputed TomTom labels for mlex annotate
+    #   leaves:
+    #     <label>: {run: <run name>}                       # this pipeline's own run
+    #     <label>: {h5: ..., attr: ..., ohe: ..., bed: ..., # external leaf: declared,
+    #               meta: {model: ..., readout: ..., union_id: ...,   # never derived
+    #                      training_celltype: ..., input_width: ..., context_window: ...}}
+    {}
+
+motiflex:
+  mlex: /path/to/kant/envs/mmv_verify/bin/mlex
+  celltype: K562
+  peak_universe_id: <declared peak universe id>
+  workers: 16
+  seed: 42

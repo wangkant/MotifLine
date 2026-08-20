@@ -23,8 +23,12 @@ longer writes or reads them.
 | `ohe.npy` | `(N, 4, W)` `int8` — the one-hot input the scores belong to |
 | `regions.bed` | `N` lines, 11 tab-separated columns |
 
-`W` is 2114 for both models: ChromBPNet's input window, and AG's central crop of
-its 16384bp window. Sharded runs write `attr_<i>.npy` / `ohe_<i>.npy` /
+`W` is the run's own attribution width, `motifline.geometry.attr_width`. Canonical
+since 2026-08-16: **CBP 2114, AG 2048** — each model attributes its native window
+and stores all of it, so the two differ by 66bp and neither is cropped to meet the
+other. Runs that declare the older AG geometry (16384bp window, central crop to
+2114) keep it, because that is what their archived arrays are.
+Sharded runs write `attr_<i>.npy` / `ohe_<i>.npy` /
 `regions_<i>.bed` — the index is in the filename so `merge_shards` can check
 that shard *i* really is the *i*-th directory it was given.
 
@@ -39,9 +43,16 @@ expands its 4-column `(chr,start,end,summit)` frame to the same 11 columns
 window runs off the chromosome (`summit ± in_window/2`), and the two models then
 handle ambiguous bases differently: CBP additionally drops any row containing an
 `0.25` (N) column or an all-zero column (`attr_cbp.py:129-134`), while AG fills
-`N → A` inside the flanks it is about to crop away and keeps the row
-(`attr_ag.py:144-147`), so that the AG region set stays equal to CBP's. This is
+`N → A` and keeps the row, so that the AG region set stays equal to CBP's. This is
 why `regions.bed` — not `peaks.bed` — is the row key for everything downstream.
+
+That fill used to be free: at the 16384 → 2114 geometry the N's were in flanks the
+step cropped away. At the native 2048 geometry there is no flank, so a filled base
+is a base MoDISco reads as an `A` that is not one. The step therefore writes
+`n_filled.tsv` (`chr, start, summit, n_filled_window, n_filled_kept`) listing the
+regions whose fill landed inside the kept window — empty file = no such region. It
+covers only the chunks *that process* computed; a resumed run cannot recount the
+chunks it skipped.
 
 ### AG chunk checkpoints — `_chunks_<i>/`
 
@@ -100,6 +111,50 @@ the same hits at coordinates shifted by a base or two — compare hit sets with 
 
 `hits_v041/` and `hits_lexicon_<route>/` are **leaves**: nothing in the DAG
 consumes them.
+
+## `merge_motiflex` / `merge_motiflex_cut` → `merges/<name>/motiflex/`
+
+The merge line's finish since 2026-08-17: two or more MoDISco h5 through
+`mlex ingest -> align -> [annotate] -> merge`, and, when the merge declares
+`cut_height`, the applied cut plus a compiled lexicon.
+
+| file | contents |
+|---|---|
+| `project.yaml` | the ingest declaration this rule wrote from config — every semantic field (model, readout, union_id, widths, celltypes) explicit |
+| `registry/` | normalised motif registry: CWM, hypothetical CWM, PPM, seqlet count, trimmed core |
+| `evidence/alignment_edges.parquet` | per registered pair: similarity at the winning registration, per-pair shuffle-null empirical p |
+| `evidence/alignment_run_summary.json` | node/pair counts and exclusion reasons (`no_offset_meets_overlap_floor` marks short-core patterns that can never merge) |
+| `merge/tree.txt`, `merge/merge_nodes.csv` | the average-linkage tree over `1 - ppm_similarity`, statistics at every candidate node; **nothing merged** |
+| `merge_cut/merge_decisions.json` | each group's members, medoid representative and evidence at the declared cut |
+| `lexicons/core.h5` + `manifest.tsv` | the compiled lexicon, content-addressed, read back with the real finemo loader |
+
+The cut is a hyperparameter: it is declared per merge in config after reading
+`merge_nodes.csv`, never defaulted. Without one the line stops at the tree.
+
+## `merge_compendium` → `merges/<name>/`
+
+Comparison arm (explicit target only; the DAG finish is motiflex above). Two or
+more MoDISco h5 clustered into one lexicon by MotifCompendium 1.0.18.
+
+| file | contents |
+|---|---|
+| `clusters.tsv` | one row per cluster: `name` (`cluster#<i>`), `source_cluster`, `num_motifs`, `num_seqlets`, `leaves` (per-leaf pattern counts), `posneg`, `avg_dist_from_summit`, MotifCompendium's quality columns (`best_match_similarity`, `lowest_constituent_cluster_similarity`, `lowest_internal_similarity`, `highest_external_similarity`), `n_<label>` per leaf, `membership` |
+| `motifs.tsv` | one row per **input** pattern: `name` (`<label>-<pos\|neg>.pattern_<i>`), `num_seqlets`, `model` (= leaf label), `posneg`, `avg_dist_from_summit`, `cluster`, `pattern` |
+| `merged.meme` | the merged lexicon — one cluster-average PPM per cluster, zero-flanks trimmed |
+| `compendium.mc` | every input pattern with its cluster assignment |
+| `merged.mc` | the cluster averages (`merged.meme` was written from this) |
+
+`membership` is `shared` when every leaf contributed a pattern to the cluster,
+`<label>_only` when one did, and the joined labels when some did — it is computed
+here, not by MotifCompendium, which clusters on CWM similarity and never reads the
+`model` column.
+
+Positive and negative patterns cannot land in the same cluster
+(`compendium.cluster_within_posneg`): similarity is computed on IC-scaled PPMs and
+is sign-blind, so without the constraint an activating and a repressive pattern of
+the same shape would merge.
+
+Nothing downstream consumes this directory — the merged lexicon is the deliverable.
 
 ## `merge_shards` → `attr/`
 

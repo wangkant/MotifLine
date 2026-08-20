@@ -55,13 +55,3 @@ def lexicon_batch(cfg: dict) -> int:
             "config.lexicons.batch is unset; the union-lexicon batch size is a "
             "documented deviation from finemo's official default and must be explicit")
     return int(lex["batch"])
-
-
-def attr_width(run_cfg: dict) -> int:
-    """Width of the saved attributions -- the shell's ``width_for()``.
-
-    AG attributes a 16384bp window but stores only the central crop, so the
-    width finemo must be told about is the crop; ChromBPNet stores its whole
-    input window.
-    """
-    return run_cfg["crop"] if run_cfg["model"] == "ag" else run_cfg["in_window"]

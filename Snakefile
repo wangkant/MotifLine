@@ -6,7 +6,10 @@ from pathlib import Path
 
 configfile: "config/default.yaml"
 
-from motifline.lexicons import attr_width, lexicon_batch, lexicon_path
+from motifline import compendium as comp
+from motifline import mlex as mlx
+from motifline.geometry import attr_width, geometry
+from motifline.lexicons import lexicon_batch, lexicon_path
 from motifline.runs import active_runs, cancelled_runs
 
 ENV = config["envs"]["compute"]
@@ -35,6 +38,7 @@ COMPUTE_THREADS = {k: "8" for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENB
 def attr_argv(r, out, shard_i=None):
     """Model-dispatched attribution command line; both steps write attr/ohe/regions.bed
     (``attr_<i>.npy``/... when a shard index is given)."""
+    g = geometry(config, r)
     if r["model"] == "ag":
         argv = [PY, str(STEPS / "attr_ag.py"),
                 "--ag_src", r["ag_src"], "--chrombpnet_src", config["chrombpnet_src"],
@@ -42,7 +46,7 @@ def attr_argv(r, out, shard_i=None):
                 "--fasta", config["genome"]["fasta"],
                 "--chrom_sizes", config["genome"]["chrom_sizes"],
                 "--out_dir", out, "--track", str(r["track"]),
-                "--in_window", str(r["in_window"]), "--crop", str(r["crop"]),
+                "--in_window", str(g["in_window"]), "--crop", str(g["crop"]),
                 "--n_shuffles", str(r["n_shuffles"]), "--chunk", str(r["chunk"]),
                 "--random_state", "42", "--hypothetical"]
     elif r["model"] == "cbp":
@@ -50,7 +54,7 @@ def attr_argv(r, out, shard_i=None):
                 "--wo_bias", r["wo_bias"], "--peaks", r["peaks"],
                 "--fasta", config["genome"]["fasta"],
                 "--chrom_sizes", config["genome"]["chrom_sizes"],
-                "--out_dir", out, "--hypothetical", "--in_window", str(r["in_window"])]
+                "--out_dir", out, "--hypothetical", "--in_window", str(g["in_window"])]
     else:
         raise ValueError(f"unknown model {r['model']!r}; expected 'cbp' or 'ag'")
     if r.get("head"):
@@ -82,6 +86,12 @@ CANCELLED = cancelled_runs(config)
 LEXICON_RUNS = sorted(k for k, v in config["runs"].items() if v.get("lexicon_hits"))
 CROSS_VERSION = sorted(k for k, v in config["runs"].items() if v.get("cross_version_hits"))
 LEXICON_ROUTES = sorted((config.get("lexicons") or {}).get("routes") or {})
+# Cross-model merges: two MoDISco h5 (CBP 2114 + AG 2048) -> one merged lexicon.
+# The finish is motiflex (2026-08-17): every merge gets an annotated tree; the ones
+# that declare a cut_height also get a compiled lexicon. MotifCompendium stays as
+# the explicit-target comparison arm (rule merge_compendium).
+MERGES = comp.merge_names(config)
+MERGE_CUT = sorted(m for m in MERGES if mlx.cut_height(config, m) is not None)
 
 
 def _alt(names):
@@ -105,7 +115,11 @@ rule all:
                run=active_runs(config, CROSS_VERSION)),
         # external-lexicon routes
         expand("results/{run}/hits_lexicon_{route}/hits.tsv",
-               run=active_runs(config, LEXICON_RUNS), route=LEXICON_ROUTES)
+               run=active_runs(config, LEXICON_RUNS), route=LEXICON_ROUTES),
+        # cross-model merges -- the end of that line, nothing calls hits on them.
+        # Every merge builds its motiflex tree; a merge with cut_height also compiles.
+        expand("results/merges/{merge}/motiflex/merge/tree.txt", merge=MERGES),
+        expand("results/merges/{merge}/motiflex/lexicons/core.h5", merge=MERGE_CUT)
 
 rule import_attr:
     """Adopt archived attributions: symlink attr/ohe, normalize peaks -> regions.bed."""
@@ -116,7 +130,7 @@ rule import_attr:
         out = f"results/{wildcards.run}/attr"
         src = r["adopt_from"]
         argv = [ORCH_PY, "-m", "motifline.adopt", "--src_dir", src, "--out_dir", out,
-                "--expected_rows", str(r["rows"]), "--expected_width", str(attr_width(r)),
+                "--expected_rows", str(r["rows"]), "--expected_width", str(attr_width(config, r)),
                 "--peaks_name", r.get("adopt_peaks", "peaks.bed")]
         run_body(out, argv)
 
@@ -183,7 +197,7 @@ rule extract_regions:
         argv = [f"{ENV}/bin/finemo", "extract-regions-modisco-fmt",
                 "-s", f"{attr_dir}/ohe.npy", "-a", f"{attr_dir}/attr.npy",
                 "-p", f"{attr_dir}/regions.bed", "-o", f"{out}/regions.npz",
-                "-w", str(attr_width(r))]
+                "-w", str(attr_width(config, r))]
         run_body(out, argv)
 
 rule call_hits:
@@ -247,3 +261,107 @@ rule call_hits_lexicon:
                 "-o", out, "-t", str(f["threshold"]), "-l", str(f["alpha"]),
                 "-b", str(batch)]
         run_body(out, argv)
+
+rule merge_compendium:
+    """Two or more MoDISco h5 -> ONE MotifCompendium lexicon (comparison arm).
+
+    No longer the end of the line: the DAG finishes merges with motiflex
+    (rule merge_motiflex, 2026-08-17). This rule stays reachable by explicit
+    target -- `snakemake results/merges/<m>/clusters.tsv` -- for the MC arm.
+
+    The leaves of a merge are the SAME regions under different models, each attributed
+    at its own native width (CBP 2114, AG 2048), so the only axis the clustering can
+    collapse is the model axis. Which entries the models actually share is not something
+    MotifCompendium reports -- it clusters on CWM similarity and never reads the `model`
+    column -- so the step recovers it into clusters.tsv.
+
+    Runs in envs/motifcompendium, not the compute env: MotifCompendium pins its own
+    numpy/pandas/igraph/leidenalg stack and nothing else in this DAG needs it.
+    """
+    input: lambda w: comp.dag_inputs(config, w.merge)
+    output: "results/merges/{merge}/clusters.tsv", "results/merges/{merge}/motifs.tsv",
+            "results/merges/{merge}/merged.meme", "results/merges/{merge}/merged.mc"
+    wildcard_constraints: merge=_alt(MERGES)
+    run:
+        c = comp.params(config)
+        out = f"results/merges/{wildcards.merge}"
+        argv = [f"{c['env']}/bin/python", str(STEPS / "merge_compendium.py"),
+                "--mc_src", c["src"], "--out_dir", out,
+                "--region_width", str(comp.region_width(config, wildcards.merge)),
+                "--algorithm", c["algorithm"],
+                "--similarity_threshold", str(c["similarity_threshold"]),
+                "--seeds", ",".join(str(s) for s in c["seeds"]),
+                "--max_cpus", str(c.get("max_cpus", 1))]
+        if c.get("use_gpu"):
+            argv += ["--use_gpu"]
+        if c.get("cluster_within_posneg") is False:
+            argv += ["--no_cluster_within_posneg"]
+        if c.get("quality_stats") is False:
+            argv += ["--no_quality_stats"]
+        for label, h5 in comp.leaves(config, wildcards.merge):
+            argv += ["--modisco", f"{label}={h5}"]
+        run_body(out, argv, env=COMPUTE_THREADS)
+
+rule merge_motiflex:
+    """N MoDISco h5 -> motiflex registry / alignment evidence / annotated merge TREE.
+
+    Nothing merges here by design: `mlex merge` without a cut writes the
+    average-linkage tree (1 - ppm_similarity, per-pair shuffle null) with the
+    statistics at every node. The cut is a hyperparameter, declared per merge as
+    `cut_height` and applied by rule merge_motiflex_cut; it is chosen by reading
+    merge/merge_nodes.csv and tree.txt, never defaulted.
+
+    Runs the mlex CLI from config.motiflex.mlex (envs/mmv_verify); CPU only.
+    Stage bodies skip existing output, so an interrupted build resumes.
+    """
+    input: lambda w: comp.dag_inputs(config, w.merge)
+    output: "results/merges/{merge}/motiflex/merge/tree.txt",
+            "results/merges/{merge}/motiflex/merge/merge_nodes.csv"
+    wildcard_constraints: merge=_alt(MERGES)
+    run:
+        import yaml
+        c = mlx.params(config)
+        out = Path(f"results/merges/{wildcards.merge}/motiflex")
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "project.yaml").write_text(
+            yaml.safe_dump(mlx.project(config, wildcards.merge), sort_keys=False, width=200))
+        seed = c.get("seed", 42)
+        if not (out / "registry/registry.json").exists():
+            run_body(out, [c["mlex"], "ingest", out / "project.yaml",
+                           "--seed", seed, "--out", out / "registry"])
+        if not (out / "evidence/alignment_edges.parquet").exists():
+            run_body(out, [c["mlex"], "align", out / "registry", "--out", out / "evidence",
+                           "--workers", c.get("workers", 8), "--seed", seed])
+        db = mlx.db_yaml(config, wildcards.merge)
+        if db and not (out / "evidence/annotation_candidates.parquet").exists():
+            run_body(out, [c["mlex"], "annotate", out / "evidence",
+                           "--registry", out / "registry",
+                           "--tomtom", "--databases", db, "--out", out / "evidence"])
+        run_body(out, [c["mlex"], "merge", out / "evidence",
+                       "--alignment", out / "evidence",
+                       "--registry", out / "registry", "--out", out / "merge"])
+
+rule merge_motiflex_cut:
+    """Apply the merge's declared cut_height; compile the shared lexicon.
+
+    Group representatives are medoids -- observed patterns, never cross-model
+    averages -- and compile reads the written lexicon back with the real finemo
+    loader (--verify-roundtrip auto). merge_cut/merge_decisions.json records each
+    group's members, representative and evidence.
+    """
+    input: "results/merges/{merge}/motiflex/merge/tree.txt"
+    output: "results/merges/{merge}/motiflex/lexicons/core.h5",
+            "results/merges/{merge}/motiflex/merge_cut/merge_decisions.json"
+    wildcard_constraints: merge=_alt(MERGE_CUT)
+    run:
+        c = mlx.params(config)
+        out = Path(f"results/merges/{wildcards.merge}/motiflex")
+        run_body(out, [c["mlex"], "merge", out / "evidence",
+                       "--alignment", out / "evidence",
+                       "--registry", out / "registry",
+                       "--cut-height", mlx.cut_height(config, wildcards.merge),
+                       "--out", out / "merge_cut"])
+        run_body(out, [c["mlex"], "compile", out / "registry",
+                       "--decisions", out / "merge_cut/merge_decisions.json",
+                       "--tiers", "core", "--verify-roundtrip", "auto",
+                       "--seed", c.get("seed", 42), "--out", out / "lexicons"])
