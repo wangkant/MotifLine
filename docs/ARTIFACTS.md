@@ -131,6 +131,23 @@ The merge line's finish since 2026-08-17: two or more MoDISco h5 through
 The cut is a hyperparameter: it is declared per merge in config after reading
 `merge_nodes.csv`, never defaulted. Without one the line stops at the tree.
 
+## `merge_cross_regions` / `merge_cross_call` / `merge_occupancy` → `merges/<name>/motiflex/{cross_call,occupancy}/`
+
+The cross-call (2026-08-20): each leaf's own regions scanned with the ONE
+compiled lexicon, then reduced to occupancy and cross-leaf agreement. Alignment
+across leaves is by bed row index; `merge_occupancy` refuses if the beds differ.
+
+| file | contents |
+|---|---|
+| `cross_call/<leaf>/regions.npz` | the leaf's arrays packaged for finemo at the leaf's native width |
+| `cross_call/<leaf>/hits.tsv` | finemo `call-hits` of the compiled lexicon over that leaf (`-b` = `lexicons.batch`) |
+| `occupancy/peak_by_motif_<leaf>.tsv.gz` | hit **counts** per (peak row, lexicon entry); columns named by `variant_id` |
+| `occupancy/occupancy.tsv` | per (motif, leaf): `n_hits`, `n_peaks` (peaks with >=1 hit), `frac_peaks` |
+| `occupancy/agreement.tsv` | per (motif, leaf pair): `n_both`/`n_only_a`/`n_only_b`/`n_neither` on the binarised matrices, `jaccard` (empty when no peak carries the motif in either leaf) |
+
+The motif universe is the compiled lexicon's manifest, not the union of motifs
+seen in hits — an entry one model never calls keeps its zero row.
+
 ## `merge_compendium` → `merges/<name>/`
 
 Comparison arm (explicit target only; the DAG finish is motiflex above). Two or

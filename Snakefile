@@ -92,6 +92,10 @@ LEXICON_ROUTES = sorted((config.get("lexicons") or {}).get("routes") or {})
 # the explicit-target comparison arm (rule merge_compendium).
 MERGES = comp.merge_names(config)
 MERGE_CUT = sorted(m for m in MERGES if mlx.cut_height(config, m) is not None)
+# A compiled merge is cross-called back over every leaf: the SAME lexicon scanned
+# over each model's own regions (rule merge_cross_call), then reduced to per-motif
+# occupancy / cross-leaf agreement (rule merge_occupancy).
+MERGE_LEAVES = sorted({l for m in MERGE_CUT for l in mlx.leaf_labels(config, m)})
 
 
 def _alt(names):
@@ -116,10 +120,12 @@ rule all:
         # external-lexicon routes
         expand("results/{run}/hits_lexicon_{route}/hits.tsv",
                run=active_runs(config, LEXICON_RUNS), route=LEXICON_ROUTES),
-        # cross-model merges -- the end of that line, nothing calls hits on them.
-        # Every merge builds its motiflex tree; a merge with cut_height also compiles.
+        # cross-model merges: every merge builds its motiflex tree; a merge with
+        # cut_height also compiles a shared lexicon, which is then cross-called
+        # over every leaf and reduced to occupancy/agreement tables.
         expand("results/merges/{merge}/motiflex/merge/tree.txt", merge=MERGES),
-        expand("results/merges/{merge}/motiflex/lexicons/core.h5", merge=MERGE_CUT)
+        expand("results/merges/{merge}/motiflex/lexicons/core.h5", merge=MERGE_CUT),
+        expand("results/merges/{merge}/motiflex/occupancy/agreement.tsv", merge=MERGE_CUT)
 
 rule import_attr:
     """Adopt archived attributions: symlink attr/ohe, normalize peaks -> regions.bed."""
@@ -351,6 +357,7 @@ rule merge_motiflex_cut:
     """
     input: "results/merges/{merge}/motiflex/merge/tree.txt"
     output: "results/merges/{merge}/motiflex/lexicons/core.h5",
+            "results/merges/{merge}/motiflex/lexicons/manifest.tsv",
             "results/merges/{merge}/motiflex/merge_cut/merge_decisions.json"
     wildcard_constraints: merge=_alt(MERGE_CUT)
     run:
@@ -365,3 +372,68 @@ rule merge_motiflex_cut:
                        "--decisions", out / "merge_cut/merge_decisions.json",
                        "--tiers", "core", "--verify-roundtrip", "auto",
                        "--seed", c.get("seed", 42), "--out", out / "lexicons"])
+
+rule merge_cross_regions:
+    """Package one leaf's arrays as finemo regions for the cross-call.
+
+    The same peak rows under each model, each at its own native width; row index
+    is the alignment key downstream (merge_occupancy verifies the beds actually
+    agree before relying on it).
+    """
+    input: lambda w: mlx.cross_call_inputs(config, w.merge, w.leaf)
+    output: "results/merges/{merge}/motiflex/cross_call/{leaf}/regions.npz"
+    wildcard_constraints: merge=_alt(MERGE_CUT), leaf=_alt(MERGE_LEAVES)
+    run:
+        l = mlx.cross_call_leaf(config, wildcards.merge, wildcards.leaf)
+        out = f"results/merges/{wildcards.merge}/motiflex/cross_call/{wildcards.leaf}"
+        argv = [f"{ENV}/bin/finemo", "extract-regions-modisco-fmt",
+                "-s", l["ohe"], "-a", l["attr"], "-p", l["bed"],
+                "-o", f"{out}/regions.npz", "-w", str(l["width"])]
+        run_body(out, argv)
+
+rule merge_cross_call:
+    """Every leaf scanned with the ONE compiled lexicon (finemo call-hits).
+
+    This is what compiling is for: both models are read through an identical
+    vocabulary, so a difference between the hit tables is a model difference,
+    not a lexicon difference. `-b` comes from config.lexicons for the same
+    reason as rule call_hits_lexicon: batch size must not vary between
+    external-lexicon calls.
+    """
+    input: npz="results/merges/{merge}/motiflex/cross_call/{leaf}/regions.npz",
+           lex="results/merges/{merge}/motiflex/lexicons/core.h5"
+    output: "results/merges/{merge}/motiflex/cross_call/{leaf}/hits.tsv"
+    wildcard_constraints: merge=_alt(MERGE_CUT), leaf=_alt(MERGE_LEAVES)
+    resources: gpu=1
+    run:
+        out = f"results/merges/{wildcards.merge}/motiflex/cross_call/{wildcards.leaf}"
+        f = config["finemo"]
+        argv = [f"{ENV}/bin/finemo", "call-hits", "-M", f["mode"],
+                "-r", input.npz, "-m", input.lex, "-o", out,
+                "-t", str(f["threshold"]), "-l", str(f["alpha"]),
+                "-b", str(lexicon_batch(config))]
+        run_body(out, argv)
+
+rule merge_occupancy:
+    """Cross-call hit tables -> per-motif occupancy and cross-leaf agreement.
+
+    Counting caliber lives in steps/merge_occupancy.py's docstring; the step
+    refuses if the leaves' beds differ anywhere, because rows align by index.
+    """
+    input:
+        hits=lambda w: [f"results/merges/{w.merge}/motiflex/cross_call/{l}/hits.tsv"
+                        for l in mlx.leaf_labels(config, w.merge)],
+        manifest="results/merges/{merge}/motiflex/lexicons/manifest.tsv"
+    output: "results/merges/{merge}/motiflex/occupancy/occupancy.tsv",
+            "results/merges/{merge}/motiflex/occupancy/agreement.tsv"
+    wildcard_constraints: merge=_alt(MERGE_CUT)
+    run:
+        out = f"results/merges/{wildcards.merge}/motiflex/occupancy"
+        argv = [PY, str(STEPS / "merge_occupancy.py"),
+                "--manifest", input.manifest, "--out_dir", out]
+        for label in mlx.leaf_labels(config, wildcards.merge):
+            l = mlx.cross_call_leaf(config, wildcards.merge, label)
+            argv += ["--hits",
+                     f"{label}=results/merges/{wildcards.merge}/motiflex/cross_call/{label}/hits.tsv",
+                     "--bed", f"{label}={l['bed']}"]
+        run_body(out, argv)

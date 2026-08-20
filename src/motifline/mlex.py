@@ -123,6 +123,49 @@ def _h5_analysis(cfg: dict, name: str, label: str, src: dict) -> dict:
     }
 
 
+def leaf_labels(cfg: dict, name: str) -> list[str]:
+    """A merge's leaf labels, in config order (the cross-call fans out over these)."""
+    return list(comp.merge_def(cfg, name).get("leaves") or {})
+
+
+def cross_call_leaf(cfg: dict, name: str, label: str) -> dict:
+    """One leaf's arrays for cross-calling: attr/ohe/bed plus the region width.
+
+    Same resolution as ingest: a ``run:`` leaf reads this pipeline's own attr/
+    stage at the run's declared width, an ``h5:`` leaf reads exactly what it
+    declared. The bed rows are the alignment key across leaves downstream, so
+    the bed returned here must be the one the arrays were computed over.
+    """
+    spec = comp.merge_def(cfg, name).get("leaves") or {}
+    if label not in spec:
+        raise MlexError(f"merge {name!r} has no leaf {label!r}; it defines {sorted(spec)}")
+    src = spec[label]
+    if isinstance(src, dict) and "run" in src:
+        r = (cfg.get("runs") or {}).get(src["run"])
+        if r is None:
+            raise MlexError(f"merge {name!r}: leaf {label!r} names unknown run {src['run']!r}")
+        base = f"results/{src['run']}/attr"
+        return {"attr": f"{base}/attr.npy", "ohe": f"{base}/ohe.npy",
+                "bed": f"{base}/regions.bed", "width": attr_width(cfg, r)}
+    a = _h5_analysis(cfg, name, label, src)
+    return {"attr": a["contributions"], "ohe": a["one_hot"],
+            "bed": a["regions_bed"], "width": a["input_width"]}
+
+
+def cross_call_inputs(cfg: dict, name: str, label: str) -> list[str]:
+    """Snakemake inputs for one leaf's cross-call regions: run-backed arrays only.
+
+    Same policy as ``compendium.dag_inputs``: an ``h5:`` leaf's arrays were not
+    produced by this pipeline, so declaring them as inputs would make an absent
+    archive look like a missing rule output.
+    """
+    src = (comp.merge_def(cfg, name).get("leaves") or {}).get(label) or {}
+    if isinstance(src, dict) and "run" in src:
+        base = f"results/{src['run']}/attr"
+        return [f"{base}/attr.npy", f"{base}/ohe.npy", f"{base}/regions.bed"]
+    return []
+
+
 def project(cfg: dict, name: str) -> dict:
     """The ``mlex ingest`` project dict for one merge, every semantic field declared."""
     spec = comp.merge_def(cfg, name).get("leaves") or {}

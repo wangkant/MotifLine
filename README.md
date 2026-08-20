@@ -21,7 +21,8 @@ adopted runs do, because their archived arrays are AG 16384bp cropped to 2114.
 ```
 Snakefile            the DAG: attr -> discover -> extract_regions -> call_hits,
                      and, off to the side, discover x2 -> merge_motiflex
-                     (-> merge_motiflex_cut when the merge declares cut_height)
+                     (-> merge_motiflex_cut -> cross-call -> occupancy
+                      when the merge declares cut_height)
 config/default.yaml  runs + shared canonical parameters + site paths
                      (not tracked: cp config/example.yaml config/default.yaml
                       and fill in the site paths)
@@ -73,7 +74,19 @@ merge (the cut is chosen by reading them, not defaulted);
 representative and evidence. `mlex ingest` refuses semantics it would have to
 guess, so an `h5:` leaf must declare its arrays and metadata (`attr`/`ohe`/`bed`/
 `meta`); a `run:` leaf gets all of that from the run's own config and outputs.
-**The line stops at the merged lexicon** — nothing calls hits against it.
+
+**The cross-call (2026-08-20).** A compiled merge no longer stops at the lexicon:
+every leaf's own regions are scanned with the ONE compiled lexicon
+(`rule merge_cross_regions` -> `rule merge_cross_call`, finemo `call-hits` with
+`lexicons.batch`), so a difference between the hit tables is a model difference,
+not a lexicon difference. `rule merge_occupancy` reduces the hit tables to
+`occupancy/occupancy.tsv` (per motif x leaf: n_hits, n_peaks with >=1 hit,
+frac_peaks), `agreement.tsv` (per motif x leaf pair: both / only-a / only-b /
+neither on the binarised peak x motif matrices, jaccard), and one
+`peak_by_motif_<leaf>.tsv.gz` count matrix per leaf. The leaves of a merge are
+the same peak rows, so alignment is by row index — the step refuses to run if
+the leaves' beds differ anywhere. A motif one model never calls keeps its zero
+row: those zeros are the comparison's point.
 
 `rule merge_compendium` (MotifCompendium 1.0.18, the tool that built the ENCODE
 CWM motif sets) remains the comparison arm, reachable only by explicit target
@@ -105,6 +118,8 @@ finished stages after any cosmetic edit.
 | same regions+lexicon with finemo 0.41 (comparison) | `call_hits_v041` | `results/<run>/hits_v041/hits.tsv` |
 | merge two models' motifs: tree | `merge_motiflex` | `results/merges/<merge>/motiflex/merge/tree.txt` |
 | apply the declared cut + compile lexicon | `merge_motiflex_cut` | `results/merges/<merge>/motiflex/lexicons/core.h5` |
+| scan a leaf's regions with the compiled lexicon | `merge_cross_call` | `results/merges/<merge>/motiflex/cross_call/<leaf>/hits.tsv` |
+| occupancy + cross-leaf agreement tables | `merge_occupancy` | `results/merges/<merge>/motiflex/occupancy/agreement.tsv` |
 | MotifCompendium comparison arm (explicit target only) | `merge_compendium` | `results/merges/<merge>/clusters.tsv` |
 
 Which rules a run gets is decided by what its config entry contains: `adopt_from`
