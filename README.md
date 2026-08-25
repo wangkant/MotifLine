@@ -152,7 +152,7 @@ motiflex:
 ```
 
 ```bash
-envs/motifline/bin/snakemake --rerun-triggers mtime -j 1 -- \
+envs/motifline/bin/snakemake --rerun-triggers mtime params -j 1 -- \
     results/merges/islandA/motiflex/lexicons/core.h5   # or .../merge/merge_nodes.tsv
 ```
 
@@ -188,12 +188,17 @@ motiflex records metacluster mixing per node instead (`cross_meta` in the tree).
 ## Running
 
 ```bash
-envs/motifline/bin/snakemake --rerun-triggers mtime -j <N> --resources gpu=<G> -- <target>
+envs/motifline/bin/snakemake --rerun-triggers mtime params -j <N> --resources gpu=<G> -- <target>
 ```
 
-`--rerun-triggers mtime` is the standard invocation: the `run:` blocks only
-assemble argv, so snakemake's code trigger would otherwise propose recomputing
-finished stages after any cosmetic edit.
+`--rerun-triggers mtime params` is the standard invocation. `mtime` alone was the
+old one and it silently disabled the parameter trigger: editing `finemo.threshold`
+or `modisco.window` left every finished stage in place and snakemake reported
+"Nothing to be done", so `results/` could hold a mixture of parameter generations
+indistinguishable from a coherent tree. Every rule now declares a `params:`
+signature of the values it actually runs at (`param_sig` in the Snakefile). The
+`code` trigger stays off on purpose: the `run:` blocks only assemble argv, so it
+would propose recomputing finished stages after any cosmetic edit.
 
 | you want | rule | target |
 |---|---|---|

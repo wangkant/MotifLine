@@ -8,14 +8,17 @@ cluster. Never an average. Averaging two real secondary modes produces a matrix 
 matches neither, and the whole point of a cluster-level vocabulary is that every entry
 is an observed matrix somebody can look up.
 
-Distances come from the Ncor computed here (``motif_matrix.ncor_matrix``), cached as
-``ncor.npy`` beside the outputs so a re-label does not recompute it.
+Distances come from the Ncor computed here (``motif_matrix.ncor_matrix``) and are
+written out as ``ncor.npy`` -- a declared output of the rule, kept because it is the
+similarity every cluster in this library was judged on and nothing else on disk records
+it. It is NOT a cache: no stage reads it back.
 
 Outputs
   lexicon_rsat.meme          one medoid PPM per cluster
   lexicon_rsat.metadata.tsv  per cluster: size, medoid, per-source counts, member TFs
   clusters_rsat.tsv          the flat motif -> cluster table, medoid flagged
-  ncor.npy                   all-pairs Ncor over the union, in source order
+  ncor.npy                   all-pairs Ncor over the union, in source order (evidence,
+                             not a cache -- nothing reads it back)
 
 This library is a reference and a plotting/publication convenience. It is NOT the
 TomTom target -- see lexicon_cltagged.py for why.
@@ -63,6 +66,8 @@ def main():
     p.add_argument("--source", action="append", required=True,
                    help="tag=path, same order as the union build")
     p.add_argument("--out_dir", required=True)
+    p.add_argument("--w_th", type=int, required=True,
+                   help="minimum comparable overlap in columns (config w_th)")
     a = p.parse_args()
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -94,7 +99,7 @@ def main():
           + ", ".join(f"{t} {(cl.source == t).sum()}" for t in tags) + ")", flush=True)
 
     pos = {n: i for i, n in enumerate(names_order)}
-    S, _, _, _ = ncor_matrix([ppms[n][0] for n in names_order])
+    S, _, _, _ = ncor_matrix([ppms[n][0] for n in names_order], w_th=a.w_th)
     np.save(out / "ncor.npy", S)
     D = 1.0 - S
 

@@ -179,6 +179,40 @@ def leaf_labels(cfg: dict, name: str) -> list[str]:
     return list(comp.merge_def(cfg, name).get("leaves") or {})
 
 
+def check_leaf_arrays(name: str, label: str, leaf: dict) -> None:
+    """Refuse a declared width the arrays cannot back.
+
+    Called from the stage body, not from ``cross_call_leaf``: config resolution runs at
+    DAG-build time and must stay pure, or a dry run would need every archive online.
+
+    ``meta.input_width`` is free text on an ``h5:`` leaf and is handed straight to
+    ``finemo extract-regions-modisco-fmt -w``. finemo computes
+    ``start = L//2 - w//2`` and slices, so a width larger than the array wraps into a
+    short, off-centre region set while ``peak_region_start`` is still computed from the
+    declared width -- the scan runs, exits 0, and every recorded coordinate is shifted.
+    Same shape of check ``adopt.adopt_attr`` already performs on the adopted path.
+    """
+    import numpy as np
+
+    attr, ohe, bed, width = leaf["attr"], leaf["ohe"], leaf["bed"], leaf["width"]
+    for path in (attr, ohe):
+        try:
+            arr = np.load(path, mmap_mode="r")
+        except (OSError, ValueError) as exc:
+            raise MlexError(f"merge {name!r}: leaf {label!r} cannot read {path}: {exc}") from exc
+        if arr.shape[-1] < width:
+            raise MlexError(
+                f"merge {name!r}: leaf {label!r} declares input_width={width} but "
+                f"{path} is {arr.shape[-1]}bp wide; finemo would slice a short, "
+                f"off-centre window and still report the declared coordinates")
+    rows = np.load(attr, mmap_mode="r").shape[0]
+    n_bed = sum(1 for line in open(bed) if line.strip())
+    if rows != n_bed:
+        raise MlexError(
+            f"merge {name!r}: leaf {label!r} has {rows} attribution rows against "
+            f"{n_bed} bed lines; rows align by index downstream")
+
+
 def cross_call_leaf(cfg: dict, name: str, label: str) -> dict:
     """One leaf's arrays for cross-calling: attr/ohe/bed plus the region width.
 
@@ -236,6 +270,10 @@ def project(cfg: dict, name: str) -> dict:
         "project": f"motifline-{name}",
         "peak_universe_id": params(cfg)["peak_universe_id"],
         "analyses": analyses,
-        "shared_attribution_groups": [],
+        # motiflex distinguishes None ("independence unknown") from [] ("checked,
+        # nothing shared"). Emitting [] unconditionally asserted a check nobody ran --
+        # and two leaves reading one archived attr.npy is constructible from this very
+        # config. Declare `shared_attribution: [[a, b]]` next to `leaves:` to state it.
+        "shared_attribution_groups": comp.merge_def(cfg, name).get("shared_attribution"),
         "provenance": {"random_seed": int(params(cfg).get("seed", 42))},
     }

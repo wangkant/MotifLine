@@ -20,7 +20,10 @@ import re
 
 import numpy as np
 
-#: Minimum overlapping columns for a pair to be comparable. RSAT's ``-lth w`` default.
+#: Fallback minimum overlapping columns for a pair to be comparable. Callers inside
+#: the pipeline pass ``config.reference_lexicon.w_th`` explicitly; this default exists
+#: so the module is usable standalone. It is NOT RSAT's ``-lth w`` (RSAT discards that
+#: arm under ``-quick``) and NOT TomTom's ``-min-overlap``.
 W_TH = 5
 
 
@@ -85,15 +88,15 @@ def ic(ppm):
     return (ppm * np.log2(ppm / 0.25 + 1e-9)).sum(1)
 
 
-def ic_core(ppm, threshold=0.3):
-    """The IC>threshold core of a PPM, or None if it is shorter than ``W_TH``.
+def ic_core(ppm, threshold=0.3, w_th=W_TH):
+    """The IC>threshold core of a PPM, or None if it is shorter than ``w_th``.
 
     This is the trim the Ncor side uses. It is NOT the trim the TomTom query uses
     (that one is modiscolite's |CWM| 30%-of-max rule, in ``name_patterns.py``); the
     two coexist on purpose and the gate reads one number from each.
     """
     k = np.where(ic(ppm) > threshold)[0]
-    if len(k) < W_TH:
+    if len(k) < w_th:
         return None
     return ppm[k[0]:k[-1] + 1]
 

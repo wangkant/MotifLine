@@ -115,6 +115,34 @@ def narrowpeak_text(rows):
                    for c, s, e, m in rows)
 
 
+#: The arguments that decide what a chunk CONTAINS. A checkpoint computed under any
+#: other value of these is not the same array, so resuming onto it must be refused
+#: rather than silently accepted -- and no rule declares `params:` for the shards, so
+#: nothing upstream would have caught it either.
+CHUNK_IDENTITY = ("weights", "peaks", "track", "head", "in_window", "crop",
+                  "n_shuffles", "random_state", "chunk", "shard_i", "n_shards")
+
+
+def check_chunk_fingerprint(cdir, a):
+    """Refuse to resume onto checkpoints computed under different parameters."""
+    import json
+
+    want = {k: getattr(a, k, None) for k in CHUNK_IDENTITY}
+    path = os.path.join(cdir, "chunk_identity.json")
+    if os.path.exists(path):
+        have = json.load(open(path))
+        if have != want:
+            diff = {k: (have.get(k), want[k]) for k in want if have.get(k) != want[k]}
+            raise SystemExit(
+                f"{cdir} holds checkpoints computed with different parameters "
+                f"(was -> now): {diff}. Resuming would concatenate arrays from two "
+                f"parameter generations into one attr.npy. Delete the directory to "
+                f"recompute, or restore the previous parameters.")
+    else:
+        with open(path, "w") as fh:
+            json.dump(want, fh, indent=2, sort_keys=True, default=str)
+
+
 def main():
     a = parse_args()
     sys.path.insert(0, a.chrombpnet_src)
@@ -189,16 +217,26 @@ def main():
     # mistaken for shard 0's and resume-skipped with the wrong rows.
     cdir = f"{a.out_dir}/_chunks{suffix}"
     os.makedirs(cdir, exist_ok=True)
+    check_chunk_fingerprint(cdir, a)
     for c in range(n_chunks):
         af, of = f"{cdir}/attr_{c}.npy", f"{cdir}/ohe_{c}.npy"
-        if os.path.exists(af) and os.path.exists(of):
+        ff = f"{cdir}/n_filled_{c}.tsv"
+        if os.path.exists(af) and os.path.exists(of) and os.path.exists(ff):
             print(f"  chunk {c}/{n_chunks} exists -> resume-skip", flush=True)
             continue
         aa, oo = [], []
+        filled.clear()
         for i in range(c * a.chunk, min((c + 1) * a.chunk, n)):
             at, oh = attr_one(i)
             aa.append(at); oo.append(oh)
         np.save(af, np.concatenate(aa, 0)); np.save(of, np.concatenate(oo, 0))
+        # The fill record is written PER CHUNK, next to the arrays it belongs to.
+        # It used to be accumulated in memory and rewritten at the end from whatever
+        # this process happened to compute, so a resumed run silently replaced the
+        # record with a shorter one -- and ARTIFACTS told the reader "empty = none".
+        with open(ff, "w") as fh:
+            for row in filled:
+                fh.write("\t".join(str(v) for v in row) + "\n")
         print(f"  chunk {c + 1}/{n_chunks} saved ({min((c+1)*a.chunk, n)}/{n})", flush=True)
 
     attr = np.concatenate([np.load(f"{cdir}/attr_{c}.npy") for c in range(n_chunks)], 0)
@@ -208,16 +246,18 @@ def main():
     with open(f"{a.out_dir}/regions{suffix}.bed", "w") as fh:
         fh.write(narrowpeak_text(df[["chr", "start", "end", "summit"]]
                                  .itertuples(index=False, name=None)))
-    # Only chunks computed in THIS process are in `filled` -- a resumed run skips finished
-    # chunks and so cannot recount them. The file is therefore written only when this process
-    # computed at least one chunk, and it says how many it covered.
-    if n_chunks:
-        with open(f"{a.out_dir}/n_filled{suffix}.tsv", "w") as fh:
-            fh.write("chr\tstart\tsummit\tn_filled_window\tn_filled_kept\n")
-            for row in filled:
-                fh.write("\t".join(str(v) for v in row) + "\n")
-    print(f"[attr_ag] N->A fill inside the kept {a.crop}bp window: {len(filled)} region(s), "
-          f"{sum(r[4] for r in filled)} base(s)", flush=True)
+    # Concatenated from the per-chunk records, so it always covers the WHOLE run --
+    # including the chunks a resumed process skipped. "Empty = no such region" is true.
+    all_filled = []
+    with open(f"{a.out_dir}/n_filled{suffix}.tsv", "w") as fh:
+        fh.write("chr\tstart\tsummit\tn_filled_window\tn_filled_kept\n")
+        for c in range(n_chunks):
+            for line in open(f"{cdir}/n_filled_{c}.tsv"):
+                if line.strip():
+                    fh.write(line)
+                    all_filled.append(line.rstrip("\n").split("\t"))
+    print(f"[attr_ag] N->A fill inside the kept {a.crop}bp window: {len(all_filled)} region(s), "
+          f"{sum(int(r[4]) for r in all_filled)} base(s)", flush=True)
     print(f"DONE attr={attr.shape} ohe={ohe.shape}", flush=True)
 
 

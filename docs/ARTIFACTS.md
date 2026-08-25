@@ -50,17 +50,27 @@ That fill used to be free: at the 16384 → 2114 geometry the N's were in flanks
 step cropped away. At the native 2048 geometry there is no flank, so a filled base
 is a base MoDISco reads as an `A` that is not one. The step therefore writes
 `n_filled.tsv` (`chr, start, summit, n_filled_window, n_filled_kept`) listing the
-regions whose fill landed inside the kept window — empty file = no such region. It
-covers only the chunks *that process* computed; a resumed run cannot recount the
-chunks it skipped.
+regions whose fill landed inside the kept window — **empty file = no such region**,
+and since 2026-08-25 that is true: the record is written per chunk
+(`_chunks_<i>/n_filled_<c>.tsv`) and concatenated at the end, so it covers the whole
+run including the chunks a resumed process skipped. Before that it was accumulated in
+memory and rewritten from whatever the last process happened to compute, so resuming
+silently replaced the record with a shorter one.
 
 ### AG chunk checkpoints — `_chunks_<i>/`
 
-`attr_<c>.npy` / `ohe_<c>.npy` per 100 regions. These are **not** stage outputs;
-they exist so a kill costs at most one chunk. Resume is by file existence
-(`chunk <c>/<n> exists -> resume-skip`), and they live per shard so one shard
-cannot resume-skip another's chunk. A directory holding only chunks is a run in
-progress, not a result.
+`attr_<c>.npy` / `ohe_<c>.npy` / `n_filled_<c>.tsv` per 100 regions, plus one
+`chunk_identity.json`. These are **not** stage outputs; they exist so a kill costs at
+most one chunk. Resume is by file existence (`chunk <c>/<n> exists -> resume-skip`),
+and they live per shard so one shard cannot resume-skip another's chunk. A directory
+holding only chunks is a run in progress, not a result.
+
+`chunk_identity.json` records the arguments that decide what a chunk *contains*
+(weights, peaks, track, head, in_window, crop, n_shuffles, random_state, chunk,
+shard index). Resuming onto checkpoints computed under different values is **refused**:
+the resume test was previously the chunk index alone, so changing a run's `track` or
+`n_shuffles` and re-running produced an `attr.npy` concatenated from two parameter
+generations, silently.
 
 ## `import_attr` → `attr/`
 
@@ -127,7 +137,7 @@ hand-built originals, `ncor.npy` agrees to 1.1e-15.
 | `lexicon_rsat.meme` | one **medoid** PPM per cluster (never an average) |
 | `lexicon_rsat.metadata.tsv` | per cluster: `lexicon_id`, `size`, `medoid`, `width`, per-source counts, `min_ncor`, `tf_symbols`, `members` |
 | `union_cltagged.meme` | the union with `{lexicon_id}__` prefixed onto each name — the TomTom target |
-| `ncor.npy` | `(M, M) float64` all-pairs Ncor over the union, in source order |
+| `ncor.npy` | `(M, M) float64` all-pairs Ncor over the union, in source order. Evidence, **not a cache**: it is the similarity every cluster was judged on and nothing else on disk records it, but no stage reads it back |
 
 `E= 0` is not cosmetic: RSAT's MEME reader requires the field and drops records
 without it **silently**, so a union missing it clusters one library and looks
@@ -139,7 +149,8 @@ like it worked.
 |---|---|
 | `<label>_query.meme` | the patterns as queried: PPM cut to modiscolite's `|CWM|` 30%-of-max span |
 | `tomtom_<label>/` | TomTom's own output (`-mi 1` deliberately absent — against a batch query it would score only the first pattern) |
-| `pattern_names.tsv` | one row per pattern: `label, key, group, pattern, n_seqlets, trim_*, ic_core_len`, `match0..2`/`cluster0..2`/`qval0..2`/`overlap0..2`, `assigned_cluster`, `cluster_stable`, `best_ncor`, `best_ncor_match`, `annotated` |
+| `pattern_names.tsv` | one row per pattern: `label, key, group, pattern, n_seqlets, trim_*, ic_core_len`, `match0..2`/`cluster0..2`/`qval0..2`/`overlap0..2`, `assigned_cluster`, `cluster_stable`, `best_ncor`, `best_ncor_match`, `annotated`, plus the provenance the names depend on — `target`, `target_sha256`, `gate_q`, `gate_ncor`, `w_th` |
+| `tomtom_<label>/target.sha256` | digest of the library that produced that TomTom run. The run is reused only when the digest matches AND the TSV ends with TomTom's closing comment block; a rebuilt lexicon or a truncated file forces a re-run instead of being silently accepted |
 | `db.yaml` | (merge stages only) the gated matches as an `mlex annotate` database |
 
 `assigned_cluster` is read off the winning target's name — the cluster id is

@@ -11,6 +11,15 @@ genome:
   fasta: /path/to/kant/data/genome/hg38.fa
   chrom_sizes: /path/to/kant/data/genome/hg38.chrom.sizes
 
+# Attribution references. tangermeme seeds each reference by random_state + shuffle
+# index (deep_lift_shap.py:428-433), deliberately so batching cannot change the output;
+# what CAN change it is the reference COUNT and the seed. Both are stated here rather
+# than inherited from chrombpnet's/tangermeme's signature, which a version bump could
+# move under us. A run may override either.
+attribution:
+  n_shuffles: 20         # == the tools' current default; verified, not assumed
+  random_state: 42
+
 # Canonical attribution geometry: each model attributes its OWN native window and
 # stores all of it. AG's 2048 is its input floor (16 x 128bp trunk bins), CBP's 2114 is
 # its training input; neither is cropped to meet the other. A run may override these --
@@ -48,7 +57,7 @@ runs:
     old_regions: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/peaks.bed
   # ---- full-scale canonical production: attributions recomputed in shards ----
   # These are not bit-for-bit reproductions of the archive: they run the tools'
-  # official parameters (docs/PARAMS_AUDIT.md), so the archive comparisons below
+  # official parameters (README.md's parameter paragraph), so the archive comparisons below
   # are consistency reports, not gates.
   k562_cbp_full:
     model: cbp
@@ -120,7 +129,7 @@ runs:
   # attr.npy/ohe.npy are a byte-identical ROW SUBSET of the same archived K562 CBP
   # attribution that k562_cbp_adopted links (prep_allclusters.py:56-80 slices
   # interpret_cbp_par_hyp on an explicit (chrom, summit_abs) join); verified in
-  # docs/RUNS.md. That is what makes its archived hits a legitimate comparison
+  # tests/test_lexicon_context_is_subset.py. That is what makes its archived hits a legitimate comparison
   # object for this pipeline's output.
   k562_cbp_cl1_adopted:
     model: cbp
@@ -131,7 +140,6 @@ runs:
     in_window: 2114
     lexicon_hits:                 # archived per-route hits for this context
       gw: /path/to/kant/new_experiment/region_v4/05_allcluster_lexicon/hits_gw/cbp/cl1/finemo_hits/hits.tsv
-      mmv: /path/to/kant/new_experiment/region_v4/05_allcluster_lexicon/hits_mmv/cbp/cl1/finemo_hits/hits.tsv
   # AG at its NATIVE 2048bp window, not the 16384->2114 crop k562_ag_adopted uses.
   # Same regions as the CBP side, so the two runs pair row-for-row; this is the run
   # `lexicons.routes.*.ag2048` names.
@@ -155,7 +163,7 @@ runs:
 
 # Canonical parameters. Every value here is the tool's own official default
 # (`--help` in envs/chrombpnet_local) unless the note says why it cannot be.
-# Full provenance, historical values and deviation reasons: docs/PARAMS_AUDIT.md.
+# Full provenance, historical values and deviation reasons: README.md's parameter paragraph.
 modisco:
   max_seqlets: 1000000   # -n is REQUIRED by the CLI: no official default exists to adopt
   window: 400            # official default (was 500 in region_v3 / the vertical slice)
@@ -195,6 +203,12 @@ reference_lexicon:
       cor: 0.75
       Ncor: 0.55
     quick: true
+  # Minimum comparable overlap (columns) for the Ncor arm: the all-pairs Ncor that
+  # picks each cluster's medoid, and the IC-core floor below which a pattern has no
+  # comparable Ncor and so fails the gate by construction. NOT rsat.lth.w (RSAT
+  # discards that under -quick) and NOT TomTom's -min-overlap (pinned to modiscolite's
+  # parameter set). Three numbers that happen to be 5; this key owns two of them.
+  w_th: 5
   tomtom: /path/to/envs/meme/bin/tomtom
   # Both arms required. ncor is set to rsat.lth.Ncor on purpose: "annotated" then means
   # the clustering itself would have merged the pattern with its match.
@@ -217,11 +231,8 @@ lexicons:
     gw:                  # each model's own genome-wide MoDISco lexicon
       cbp: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
       ag2048: /path/to/kant/new_experiment/region_v4/02_motif_grammar/interpret_ag2048_par_hyp/k562/modisco.h5
-    mmv:                 # ONE motifmultiverse union lexicon for both models, deliberately
-      cbp: /path/to/kant/new_experiment/region_v4/05_allcluster_lexicon/mmv/lexicons_v2/core.h5
-      ag2048: /path/to/kant/new_experiment/region_v4/05_allcluster_lexicon/mmv/lexicons_v2/core.h5
 
-# finemo 0.30-vs-0.41 comparison (docs/PARAMS_AUDIT.md): rule call_hits_v041
+# finemo 0.30-vs-0.41 comparison (README.md's parameter paragraph): rule call_hits_v041
 # reuses the regions.npz and modisco.h5 that the compute env's 0.30 produced and
 # calls hits with envs.finemo_alt -- that is the experiment.
 

@@ -37,8 +37,12 @@ def _read_bed(path):
         return [ln.rstrip("\n") for ln in fh if ln.strip()]
 
 
-def normalize_peaks(src, dst) -> dict:
-    """Write ``dst`` as a narrowPeak-shaped regions bed; never reorder or drop rows."""
+def normalize_peaks_text(src) -> dict:
+    """Parse and validate ``src``, returning the text to write -- writes nothing.
+
+    Split out of ``normalize_peaks`` so a caller can fail on a malformed bed before it
+    creates anything on disk.
+    """
     lines = _read_bed(src)
     widths = {ln.count("\t") + 1 for ln in lines}
     if len(widths) > 1:
@@ -56,9 +60,20 @@ def normalize_peaks(src, dst) -> dict:
         expanded = False
     else:
         raise ValueError(f"{src}: expected 4, 10 or 11 columns, saw {ncol}")
+    return {"text": text, "rows": len(lines), "src_columns": ncol,
+            "expanded_from_summit_bed": expanded}
+
+
+def write_peaks(parsed: dict, dst) -> dict:
+    """Write what ``normalize_peaks_text`` parsed."""
     Path(dst).parent.mkdir(parents=True, exist_ok=True)
-    Path(dst).write_text(text)
-    return {"rows": len(lines), "src_columns": ncol, "expanded_from_summit_bed": expanded}
+    Path(dst).write_text(parsed["text"])
+    return {k: v for k, v in parsed.items() if k != "text"}
+
+
+def normalize_peaks(src, dst) -> dict:
+    """Validate and write in one call (the shape every existing caller expects)."""
+    return write_peaks(normalize_peaks_text(src), dst)
 
 
 def adopt_attr(src_dir, out_dir, expected_rows: int, expected_width: int,
@@ -82,12 +97,18 @@ def adopt_attr(src_dir, out_dir, expected_rows: int, expected_width: int,
         raise ValueError(f"width drift: attr={sa[-1]} ohe={so[-1]} expected={expected_width}")
 
     out.mkdir(parents=True, exist_ok=True)
+    # Normalise the bed FIRST. It is the step that can still refuse (a ragged bed, an
+    # unsupported column count), and doing it after the symlinks left attr.npy and
+    # ohe.npy linked with no regions.bed beside them -- a half-adopted directory the
+    # docstring promises cannot exist. Inside the DAG snakemake cleans up after a failed
+    # job; the documented direct CLI has no such backstop.
+    bed_text = normalize_peaks_text(peaks_src)
     for name, target in ((attr_name, attr_src), (ohe_name, ohe_src)):
         link = out / name
         if link.is_symlink() or link.exists():
             link.unlink()
         link.symlink_to(target)
-    bed_info = normalize_peaks(peaks_src, out / "regions.bed")
+    bed_info = write_peaks(bed_text, out / "regions.bed")
     return {"rows": int(sa[0]), "width": int(sa[-1]), "peaks": bed_info,
             "sources": {"attr": str(attr_src), "ohe": str(ohe_src), "peaks": str(peaks_src)}}
 

@@ -4,6 +4,7 @@ Not a unit-test suite for its own sake: every case here is a way the chain has b
 seen to fail silently, or a parameter whose value is a decision rather than a default.
 """
 import importlib.util
+import json
 from pathlib import Path
 
 import numpy as np
@@ -32,6 +33,7 @@ CFG = {"reference_lexicon": {
     "rsat": {"bin": "/env/rsat/bin/rsat", "hclust_method": "average",
              "metric": "Ncor", "lth": {"cor": 0.75, "Ncor": 0.55}, "quick": True},
     "tomtom": "/env/meme/bin/tomtom",
+    "w_th": 5,
     "gate": {"qval": 0.05, "ncor": 0.55}}}
 
 HOCOMOCO_STYLE = """MEME version 4
@@ -156,9 +158,86 @@ def test_merge_annotate_has_a_database_by_default():
     assert mlx.db_yaml(cfg, "islandA") == "/frozen/db.yaml"
 
 
-def test_db_node_ids_match_the_ids_mlex_ingest_registers():
-    """annotate joins on <analysis id>::<pattern key> and proposes nothing for an id
-    that does not exist -- so these two have to be derived from one rule."""
+def test_db_node_ids_match_the_ids_mlex_ingest_really_writes(tmp_path):
+    """The half of the join that comes from motiflex, exercised rather than assumed.
+
+    `mlex annotate` matches a database entry to a candidate on
+    `<analysis id>::<pattern key>` and proposes nothing -- silently, backend logged
+    UNVERIFIED -- for an id that does not exist. The sibling test below compares two
+    strings this repo computes, so it cannot see a motiflex-side format change; this one
+    runs the real ingest and reads the ids back out of registry.json. motiflex removed a
+    whole subcommand on 2026-08-23, so a format change is not hypothetical.
+    """
+    import subprocess
+
+    import h5py
+    import yaml
+
+    cfg = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / "config/default.yaml").read_text())
+    mlex_bin = ((cfg.get("motiflex") or {}).get("mlex") or "")
+    if not Path(mlex_bin).exists():
+        pytest.skip("mlex binary not available at config.motiflex.mlex")
+
+    rng = np.random.default_rng(0)
+    n_regions, width = 4, 200
+    analyses = []
+    for label in ("cbp", "ag"):
+        d = tmp_path / label
+        d.mkdir()
+        ohe = np.zeros((n_regions, 4, width), dtype=np.int8)
+        ohe[:, 0, :] = 1
+        attr = rng.normal(size=(n_regions, 4, width)).astype(np.float32)
+        np.save(d / "ohe.npy", ohe)
+        np.save(d / "attr.npy", attr)
+        (d / "regions.bed").write_text("".join(
+            f"chr1\t{i * 1000}\t{i * 1000 + width}\tp{i}\t0\t.\t0\t0\t0\t{width // 2}\tTrue\n"
+            for i in range(n_regions)))
+        with h5py.File(d / "modisco.h5", "w") as f:
+            for group in ("pos_patterns", "neg_patterns"):
+                g = f.create_group(group)
+                for k in range(2):
+                    pat = g.create_group(f"pattern_{k}")
+                    ppm = rng.random((10, 4))
+                    pat.create_dataset("sequence", data=ppm / ppm.sum(1, keepdims=True))
+                    pat.create_dataset("contrib_scores", data=rng.normal(size=(10, 4)))
+                    pat.create_dataset("hypothetical_contribs", data=rng.normal(size=(10, 4)))
+                    sq = pat.create_group("seqlets")
+                    sq.create_dataset("n_seqlets", data=np.array([7]))
+        analyses.append({
+            "id": nm.node_prefix("smoke", label),
+            "model": "chrombpnet" if label == "cbp" else "alphagenome",
+            "readout": "counts" if label == "cbp" else "atac_track60",
+            "union_id": label.upper(), "context": "smoke",
+            "readout_celltype": "K562", "training_celltype": "K562",
+            "input_width": width, "context_window": width,
+            "modisco_h5": str(d / "modisco.h5"), "contributions": str(d / "attr.npy"),
+            "one_hot": str(d / "ohe.npy"), "regions_bed": str(d / "regions.bed"),
+            "search_metaclusters": {"pos_patterns": True, "neg_patterns": True},
+        })
+    project = tmp_path / "project.yaml"
+    project.write_text(yaml.safe_dump(
+        {"project": "smoke", "peak_universe_id": "SMOKE", "analyses": analyses,
+         "shared_attribution_groups": None, "provenance": {"random_seed": 42}},
+        sort_keys=False))
+    r = subprocess.run([mlex_bin, "ingest", str(project), "--seed", "42",
+                        "--out", str(tmp_path / "registry")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-2000:]
+    registered = {n["node_id"] for n in
+                  json.loads((tmp_path / "registry/registry.json").read_text())["nodes"]}
+    # what merge_naming would put in db.yaml for the same patterns
+    ours = {f"{nm.node_prefix('smoke', label)}::{group}.pattern_{k}"
+            for label in ("cbp", "ag") for group in ("pos_patterns", "neg_patterns")
+            for k in range(2)}
+    assert ours == registered, (
+        f"db.yaml node ids and ingest's registered ids have diverged; annotate would "
+        f"propose nothing. ours-only={sorted(ours - registered)[:3]} "
+        f"ingest-only={sorted(registered - ours)[:3]}")
+
+
+def test_db_node_ids_match_the_ids_mlex_project_declares():
+    """The cheap half: db.yaml and the ingest project must agree inside this repo."""
     cfg = {"motiflex": {"mlex": "mlex", "celltype": "K562", "peak_universe_id": "U"},
            "compendium": {"merges": {"islandA": {"leaves": {
                "cbp": {"h5": "a", "attr": "x", "ohe": "y", "bed": "z",

@@ -28,6 +28,10 @@ def parse_args():
     ap.add_argument("--batch_size", type=int, default=32)
     ap.add_argument("--in_window", type=int, default=2114)
     ap.add_argument("--random_state", type=int, default=42)
+    ap.add_argument("--n_shuffles", type=int, default=20,
+                   help="dinucleotide-shuffled references per region; stated rather "
+                        "than inherited from chrombpnet's signature, which the AG side "
+                        "already states in config")
     ap.add_argument("--head", type=int, default=None, help="take only the first N peaks (slice runs)")
     ap.add_argument("--n_shards", type=int, default=None,
                     help="split the peak list into N contiguous shards (full-scale runs)")
@@ -107,8 +111,12 @@ def main():
         p.requires_grad = False
     model = CountWrapper(model) if a.task == "counts" else ProfileWrapper(model)
 
+    # in_window is passed explicitly: load_region_df drops regions whose summit is
+    # within flank_length = in_window//2 of a chromosome end, and left to its own
+    # default it filters at 2114 regardless of what get_seq below then fetches. At a
+    # wider window that lets a too-close peak through to a truncated pyfaidx slice.
     regions_df = load_region_df(normalize_peaks_bed(a.peaks, a.out_dir),
-                                chrom_sizes=a.chrom_sizes)
+                                chrom_sizes=a.chrom_sizes, in_window=a.in_window)
     suffix = ""
     if a.n_shards is not None:
         # Shard BEFORE the N-base masks, exactly as shap_shard.py did: the masks drop
@@ -135,6 +143,7 @@ def main():
 
     attr = _deep_lift_shap(model.to("cuda"), seq, batch_size=a.batch_size, verbose=True,
                            args=None, warning_threshold=1e8, device="cuda",
+                           n_shuffles=a.n_shuffles,
                            hypothetical=a.hypothetical, random_state=a.random_state)
     attr = attr.cpu().numpy() if isinstance(attr, torch.Tensor) else np.asarray(attr)
     np.save(os.path.join(a.out_dir, f"attr{suffix}.npy"), attr.astype(np.float32))

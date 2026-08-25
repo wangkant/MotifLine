@@ -1,4 +1,5 @@
 # Snakefile
+import json
 import os
 import subprocess
 import sys
@@ -21,6 +22,55 @@ STEPS = Path(workflow.basedir) / "src/motifline/steps"
 def rundef(w):
     return config["runs"][w.run]
 
+def param_sig(**kv):
+    """A stable rendering of the scientific parameters a stage runs at.
+
+    Declared as ``params:`` so that ``--rerun-triggers mtime params`` invalidates a
+    stage when a value it uses changes in config. Without it, editing
+    ``finemo.threshold``, ``modisco.window`` or a run's ``track`` left every existing
+    output in place and snakemake reported "Nothing to be done" -- results/ could then
+    hold a mixture of parameter generations indistinguishable from a coherent tree.
+    The value is never read by a stage body; only its identity matters.
+    """
+    return json.dumps(kv, sort_keys=True, default=str)
+
+
+def sig_import_attr(w):
+    r = rundef(w)
+    return param_sig(src=r["adopt_from"], rows=r["rows"], width=attr_width(config, r),
+                     peaks=r.get("adopt_peaks", "peaks.bed"))
+
+
+def sig_naming(w=None):
+    return param_sig(gate=nm.gate(config), tomtom=nm.params(config)["tomtom"],
+                     w_th=nm.w_th(config))
+
+
+def sig_merge_naming(w):
+    return param_sig(gate=nm.gate(config), tomtom=nm.params(config)["tomtom"],
+                     w_th=nm.w_th(config),
+                     leaves=[l for l, _ in nm.merge_leaf_h5(config, w.merge)])
+
+
+def sig_merge_ingest(w):
+    return param_sig(project=mlx.project(config, w.merge),
+                     seed=mlx.params(config).get("seed", 42))
+
+
+def sig_merge_align(w=None):
+    c = mlx.params(config)
+    return param_sig(workers=c.get("workers", 8), seed=c.get("seed", 42))
+
+
+def sig_cross_regions(w):
+    return param_sig(width=mlx.cross_call_leaf(config, w.merge, w.leaf)["width"])
+
+
+def sig_compendium(w):
+    return param_sig(compendium=comp.params(config),
+                     region_width=comp.region_width(config, w.merge))
+
+
 def run_body(out_dir, argv, env=None):
     """Make the stage directory and run the stage body in it."""
     os.makedirs(out_dir, exist_ok=True)
@@ -40,6 +90,9 @@ def attr_argv(r, out, shard_i=None):
     """Model-dispatched attribution command line; both steps write attr/ohe/regions.bed
     (``attr_<i>.npy``/... when a shard index is given)."""
     g = geometry(config, r)
+    att = config["attribution"]
+    n_shuffles = str(r.get("n_shuffles", att["n_shuffles"]))
+    random_state = str(r.get("random_state", att["random_state"]))
     if r["model"] == "ag":
         argv = [PY, str(STEPS / "attr_ag.py"),
                 "--ag_src", r["ag_src"], "--chrombpnet_src", config["chrombpnet_src"],
@@ -48,14 +101,15 @@ def attr_argv(r, out, shard_i=None):
                 "--chrom_sizes", config["genome"]["chrom_sizes"],
                 "--out_dir", out, "--track", str(r["track"]),
                 "--in_window", str(g["in_window"]), "--crop", str(g["crop"]),
-                "--n_shuffles", str(r["n_shuffles"]), "--chunk", str(r["chunk"]),
-                "--random_state", "42", "--hypothetical"]
+                "--n_shuffles", n_shuffles, "--chunk", str(r["chunk"]),
+                "--random_state", random_state, "--hypothetical"]
     elif r["model"] == "cbp":
         argv = [PY, str(STEPS / "attr_cbp.py"), "--chrombpnet_src", config["chrombpnet_src"],
                 "--wo_bias", r["wo_bias"], "--peaks", r["peaks"],
                 "--fasta", config["genome"]["fasta"],
                 "--chrom_sizes", config["genome"]["chrom_sizes"],
-                "--out_dir", out, "--hypothetical", "--in_window", str(g["in_window"])]
+                "--out_dir", out, "--hypothetical", "--in_window", str(g["in_window"]),
+                "--n_shuffles", n_shuffles, "--random_state", random_state]
     else:
         raise ValueError(f"unknown model {r['model']!r}; expected 'cbp' or 'ag'")
     if r.get("head"):
@@ -140,6 +194,7 @@ rule import_attr:
     """Adopt archived attributions: symlink attr/ohe, normalize peaks -> regions.bed."""
     output: "results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy", "results/{run}/attr/regions.bed"
     wildcard_constraints: run=_alt(ADOPTED)
+    params: sig=sig_import_attr
     run:
         r = rundef(wildcards)
         out = f"results/{wildcards.run}/attr"
@@ -153,6 +208,7 @@ rule attribute:
     output: "results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy", "results/{run}/attr/regions.bed"
     wildcard_constraints: run=_alt(SINGLE)
     resources: gpu=1
+    params: sig=lambda w: param_sig(argv=attr_argv(rundef(w), "<out>"))
     run:
         r = rundef(wildcards)
         out = f"results/{wildcards.run}/attr"
@@ -165,6 +221,7 @@ rule attribute_sharded:
             "results/{run}/attr_shards/shard_{i}/regions_{i}.bed"
     wildcard_constraints: run=_alt(SHARDED), i=r"\d+"
     resources: gpu=1
+    params: sig=lambda w: param_sig(argv=attr_argv(rundef(w), "<out>", shard_i=int(w.i)))
     run:
         r = rundef(wildcards)
         i = int(wildcards.i)
@@ -177,6 +234,7 @@ rule merge_shards:
     input: shard_outputs
     output: "results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy", "results/{run}/attr/regions.bed"
     wildcard_constraints: run=_alt(SHARDED)
+    params: sig=lambda w: param_sig(n_shards=rundef(w)["n_shards"], rows=rundef(w).get("rows"))
     run:
         r = rundef(wildcards)
         dirs = shard_dirs(wildcards.run)
@@ -194,6 +252,7 @@ ATTR_FILES = ["results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy",
 rule discover:
     input: ATTR_FILES
     output: "results/{run}/modisco/modisco.h5"
+    params: sig=param_sig(modisco=config["modisco"])
     run:
         attr_dir = f"results/{wildcards.run}/attr"
         out = f"results/{wildcards.run}/modisco"
@@ -205,6 +264,7 @@ rule discover:
 rule extract_regions:
     input: ATTR_FILES
     output: "results/{run}/finemo_regions/regions.npz"
+    params: sig=lambda w: param_sig(width=attr_width(config, rundef(w)))
     run:
         r = rundef(wildcards)
         attr_dir = f"results/{wildcards.run}/attr"
@@ -219,6 +279,7 @@ rule call_hits:
     input: npz=rules.extract_regions.output, lex=rules.discover.output
     output: "results/{run}/hits/hits.tsv"
     resources: gpu=1
+    params: sig=param_sig(finemo=config["finemo"], env=ENV)
     run:
         reg_dir = f"results/{wildcards.run}/finemo_regions"
         mod_dir = f"results/{wildcards.run}/modisco"
@@ -239,6 +300,7 @@ rule call_hits_v041:
     output: "results/{run}/hits_v041/hits.tsv"
     wildcard_constraints: run=_alt(CROSS_VERSION)
     resources: gpu=1
+    params: sig=param_sig(finemo=config["finemo"], env=ENV_ALT)
     run:
         reg_dir = f"results/{wildcards.run}/finemo_regions"
         mod_dir = f"results/{wildcards.run}/modisco"
@@ -260,15 +322,17 @@ rule call_hits_lexicon:
     a context against a vocabulary that context did not discover. `-b` comes from
     config.lexicons, not config.finemo: the union lexicon needs the smaller batch.
     """
-    input: npz="results/{run}/finemo_regions/regions.npz"
+    input: npz="results/{run}/finemo_regions/regions.npz",
+           lex=lambda w: lexicon_path(config, rundef(w), w.route)
     output: "results/{run}/hits_lexicon_{route}/hits.tsv"
     wildcard_constraints: run=_alt(LEXICON_RUNS), route=_alt(LEXICON_ROUTES)
     resources: gpu=1
+    params: sig=lambda w: param_sig(finemo=config["finemo"], batch=lexicon_batch(config))
     run:
         r = rundef(wildcards)
         reg_dir = f"results/{wildcards.run}/finemo_regions"
         out = f"results/{wildcards.run}/hits_lexicon_{wildcards.route}"
-        lex = lexicon_path(config, r, wildcards.route)
+        lex = input.lex
         batch = lexicon_batch(config)
         f = config["finemo"]
         argv = [f"{ENV}/bin/finemo", "call-hits", "-M", f["mode"],
@@ -289,6 +353,7 @@ rule lexicon_union:
     """Source libraries -> one union MEME, matrices untouched (E= 0 added for RSAT)."""
     input: lambda w: nm.source_paths(config)
     output: nm.UNION
+    params: sig=param_sig(sources=list(nm.params(config)["sources"]))
     run:
         argv = [PY, str(STEPS / "lexicon_union.py"), *nm.source_argv(config),
                 "--out", output[0]]
@@ -304,20 +369,34 @@ rule lexicon_rsat:
     """
     input: nm.UNION
     output: nm.CLUSTERS_TAB
+    params: sig=param_sig(argv=nm.rsat_argv(config, "<union>", "<out>"))
     run:
         out = nm.RSAT_DIR
         os.makedirs(out, exist_ok=True)
         rsat_bin = Path(nm.rsat(config)["bin"]).parent
         run_body(out, nm.rsat_argv(config, input[0], f"{out}/rsat"),
                  env={"PATH": f"{rsat_bin}:{os.environ['PATH']}"})
+        # The launcher cannot report failure (see naming.rsat_argv), and snakemake only
+        # checks that clusters.tab exists -- which it would, left over from a previous
+        # run at different thresholds. Check the partition covers the union it was given.
+        n_union = sum(1 for l in open(input[0]) if l.startswith("MOTIF "))
+        n_clustered = sum(len(l.rstrip("\n").split("\t")[1].split(","))
+                          for l in open(output[0]))
+        if n_clustered != n_union:
+            raise ValueError(
+                f"RSAT clustered {n_clustered} of {n_union} union motifs; the launcher "
+                f"exits 0 whatever happens, so this is the only place a failed or stale "
+                f"clustering is caught. See {out}/rsat_log.txt.")
 
 rule lexicon_medoid:
     """One medoid per RSAT cluster -> the compact reference library (+ the Ncor cache)."""
     input: tab=nm.CLUSTERS_TAB, sources=lambda w: nm.source_paths(config)
-    output: nm.MEDOID_MEME, nm.METADATA, nm.CLUSTERS
+    output: nm.MEDOID_MEME, nm.METADATA, nm.CLUSTERS, nm.NCOR
+    params: sig=param_sig(w_th=nm.w_th(config), sources=list(nm.params(config)["sources"]))  # noqa: E501
     run:
         argv = [PY, str(STEPS / "lexicon_medoid.py"), "--clusters_tab", input.tab,
-                *nm.source_argv(config), "--out_dir", nm.LEXICON_DIR]
+                *nm.source_argv(config), "--w_th", str(nm.w_th(config)),
+                "--out_dir", nm.LEXICON_DIR]
         run_body(nm.LEXICON_DIR, argv, env=COMPUTE_THREADS)
 
 rule lexicon_cltagged:
@@ -335,6 +414,7 @@ rule name_patterns:
     input: h5="results/{run}/modisco/modisco.h5",
            lex=lambda w: nm.naming_inputs(config)
     output: nm.run_names("{run}")
+    params: sig=sig_naming
     # constrained to declared run names so that a merge's naming directory, which has
     # the same shape, can only ever be built by rule merge_naming
     wildcard_constraints: run=_alt(sorted(config["runs"]))
@@ -345,6 +425,7 @@ rule name_patterns:
                 "--h5", f"{wildcards.run}={input.h5}",
                 "--target", nm.CLTAGGED, *nm.source_argv(config),
                 "--tomtom", nm.params(config)["tomtom"],
+                "--w_th", str(nm.w_th(config)),
                 "--gate_q", str(q), "--gate_ncor", str(ncor), "--out_dir", out]
         run_body(out, argv, env=COMPUTE_THREADS)
 
@@ -359,6 +440,7 @@ rule merge_naming:
            lex=lambda w: nm.naming_inputs(config)
     output: nm.merge_names("{merge}"), nm.merge_db_yaml("{merge}")
     wildcard_constraints: merge=_alt(MERGES)
+    params: sig=sig_merge_naming
     run:
         q, ncor = nm.gate(config)
         merge = wildcards.merge
@@ -366,6 +448,7 @@ rule merge_naming:
         argv = [PY, str(STEPS / "name_patterns.py"),
                 "--target", nm.CLTAGGED, *nm.source_argv(config),
                 "--tomtom", nm.params(config)["tomtom"],
+                "--w_th", str(nm.w_th(config)),
                 "--gate_q", str(q), "--gate_ncor", str(ncor),
                 "--out_dir", out, "--db_yaml", nm.merge_db_yaml(merge)]
         for label, h5 in nm.merge_leaf_h5(config, merge):
@@ -393,6 +476,7 @@ rule merge_compendium:
     output: "results/merges/{merge}/clusters.tsv", "results/merges/{merge}/motifs.tsv",
             "results/merges/{merge}/merged.meme", "results/merges/{merge}/merged.mc"
     wildcard_constraints: merge=_alt(MERGES)
+    params: sig=sig_compendium
     run:
         c = comp.params(config)
         out = f"results/merges/{wildcards.merge}"
@@ -427,6 +511,7 @@ rule merge_ingest:
     output: registry=f"{MOTIFLEX}/registry/registry.json",
             project=f"{MOTIFLEX}/project.yaml"
     wildcard_constraints: merge=_alt(MERGES)
+    params: sig=sig_merge_ingest
     run:
         import yaml
         c = mlx.params(config)
@@ -442,6 +527,7 @@ rule merge_align:
     input: f"{MOTIFLEX}/registry/registry.json"
     output: f"{MOTIFLEX}/evidence/alignment_edges.parquet"
     wildcard_constraints: merge=_alt(MERGES)
+    params: sig=sig_merge_align
     run:
         c = mlx.params(config)
         out = Path(MOTIFLEX.format(merge=wildcards.merge))
@@ -485,6 +571,7 @@ rule merge_tree:
             groups=f"{MOTIFLEX}/merge/merge_groups.tsv",
             nodes=f"{MOTIFLEX}/merge/merge_nodes.tsv"
     wildcard_constraints: merge=_alt(MERGE_GATED)
+    params: sig=lambda w: param_sig(thresholds=mlx.thresholds(config, w.merge))
     run:
         out = Path(MOTIFLEX.format(merge=wildcards.merge))
         t = mlx.thresholds(config, wildcards.merge)
@@ -506,6 +593,7 @@ rule merge_compile:
     output: f"{MOTIFLEX}/lexicons/core.h5",
             f"{MOTIFLEX}/lexicons/manifest.tsv"
     wildcard_constraints: merge=_alt(MERGE_GATED)
+    params: sig=param_sig(tiers="core", seed=mlx.params(config).get("seed", 42))
     run:
         c = mlx.params(config)
         out = Path(MOTIFLEX.format(merge=wildcards.merge))
@@ -524,8 +612,10 @@ rule merge_cross_regions:
     input: lambda w: mlx.cross_call_inputs(config, w.merge, w.leaf)
     output: "results/merges/{merge}/motiflex/cross_call/{leaf}/regions.npz"
     wildcard_constraints: merge=_alt(MERGE_GATED), leaf=_alt(MERGE_LEAVES)
+    params: sig=sig_cross_regions
     run:
         l = mlx.cross_call_leaf(config, wildcards.merge, wildcards.leaf)
+        mlx.check_leaf_arrays(wildcards.merge, wildcards.leaf, l)
         out = f"results/merges/{wildcards.merge}/motiflex/cross_call/{wildcards.leaf}"
         argv = [f"{ENV}/bin/finemo", "extract-regions-modisco-fmt",
                 "-s", l["ohe"], "-a", l["attr"], "-p", l["bed"],
@@ -546,6 +636,7 @@ rule merge_cross_call:
     output: "results/merges/{merge}/motiflex/cross_call/{leaf}/hits.tsv"
     wildcard_constraints: merge=_alt(MERGE_GATED), leaf=_alt(MERGE_LEAVES)
     resources: gpu=1
+    params: sig=param_sig(finemo=config["finemo"], batch=lexicon_batch(config))
     run:
         out = f"results/merges/{wildcards.merge}/motiflex/cross_call/{wildcards.leaf}"
         f = config["finemo"]

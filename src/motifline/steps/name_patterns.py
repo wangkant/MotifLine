@@ -31,7 +31,9 @@ grouping cluster ids into site types is a human judgement made once per project,
 derivable function of the matrices.
 """
 import argparse
+import hashlib
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -44,6 +46,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from motif_matrix import MEME_HEADER, ic_core, ncor_matrix, read_meme  # noqa: E402
 
 GROUPS = ("pos_patterns", "neg_patterns")
+
+
+def _digest(path):
+    """sha256 of the target library, so a rebuilt lexicon cannot be silently reused."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _complete(tsv):
+    """TomTom closes its TSV with a '# Tomtom ... Version' comment block.
+
+    A run killed mid-write leaves a file that `pd.read_csv(comment='#')` parses happily
+    and that yields fewer matches than it should, so completeness is checked, not
+    assumed."""
+    try:
+        tail = open(tsv, "rb").read()[-4096:].decode("utf-8", "replace")
+    except OSError:
+        return False
+    return any(l.startswith("# Tomtom") for l in tail.splitlines())
 
 
 def modisco_trim(ppm, cwm, threshold=0.3):
@@ -124,6 +148,8 @@ def main():
     p.add_argument("--source", action="append", required=True,
                    help="tag=path of the untagged union sources, for the Ncor arm")
     p.add_argument("--tomtom", required=True)
+    p.add_argument("--w_th", type=int, required=True,
+                   help="minimum comparable overlap in columns for the Ncor arm")
     p.add_argument("--gate_q", type=float, required=True)
     p.add_argument("--gate_ncor", type=float, required=True)
     p.add_argument("--out_dir", required=True)
@@ -151,11 +177,23 @@ def main():
               f"{np.median([len(r['trim']) for r in pats[label]]):.0f}", flush=True)
 
     # ---- 2. TomTom against the tagged union (batch query: NO -mi 1) ----
+    target_key = _digest(a.target)
     for label, _ in leaves:
         d = out / f"tomtom_{label}"
-        if not (d / "tomtom.tsv").exists():
+        stamp = d / "target.sha256"
+        # Reuse only when the SAME target library produced a COMPLETE run. Existence
+        # alone was not enough: a rebuilt reference lexicon left the old tomtom.tsv in
+        # place (it is not a rule output, so snakemake never removed it) and the names
+        # came from the previous library while db.yaml recorded the new one; and an
+        # interrupted TomTom left a truncated tsv that parsed without complaint.
+        usable = (d / "tomtom.tsv").exists() and _complete(d / "tomtom.tsv") \
+            and stamp.exists() and stamp.read_text().strip() == target_key
+        if not usable:
+            if d.exists():
+                shutil.rmtree(d)
             subprocess.run(tomtom_argv(a.tomtom, out / f"{label}_query.meme", a.target, d),
                            check=True)
+            stamp.write_text(target_key + "\n")
         print(f"  tomtom {label} done", flush=True)
 
     # ---- 3. Ncor of each pattern's IC core against every library matrix ----
@@ -170,13 +208,13 @@ def main():
     mats = list(lib_mats)
     for label, _ in leaves:
         for r in pats[label]:
-            core = ic_core(r["ppm"])
+            core = ic_core(r["ppm"], w_th=a.w_th)
             r["ic_core_len"] = 0 if core is None else len(core)
             if core is None:           # IC core shorter than the comparable minimum
                 continue
             core_of.append((label, r["key"]))
             mats.append(core)
-    S, _, _, _ = ncor_matrix(mats)
+    S, _, _, _ = ncor_matrix(mats, w_th=a.w_th)
     best_ncor = {}
     for i, k in enumerate(core_of):
         row = S[nl + i, :nl]
@@ -208,6 +246,14 @@ def main():
             rec["annotated"] = gated(rec["qval0"], nc, a.gate_q, a.gate_ncor)
             rows.append(rec)
     df = pd.DataFrame(rows)
+    # Provenance on the table itself: someone holding pattern_names.tsv must be able to
+    # say which library and which gate produced these names, and config/default.yaml is
+    # deliberately untracked, so it cannot be the answer.
+    df["target"] = Path(a.target).name
+    df["target_sha256"] = target_key[:12]
+    df["gate_q"] = a.gate_q
+    df["gate_ncor"] = a.gate_ncor
+    df["w_th"] = a.w_th
     df.to_csv(out / "pattern_names.tsv", sep="\t", index=False)
     print(f"\npattern_names.tsv: {len(df)} patterns; annotated {int(df.annotated.sum())}, "
           f"below the gate {int((~df.annotated).sum())} "
@@ -222,15 +268,15 @@ def main():
     # ---- 5. optional: the mlex annotate database, gated matches only ----
     if a.db_yaml:
         import yaml
-        try:
-            v = subprocess.run([a.tomtom, "-version"], capture_output=True, text=True,
-                               check=True).stdout.strip()
-        except (subprocess.CalledProcessError, OSError):
-            v = "unknown"
+        # Fail loudly: motiflex copies this string into every annotation row's
+        # source_version, and "MEME unknown" is a provenance hole, not a value.
+        v = subprocess.run([a.tomtom, "-version"], capture_output=True, text=True,
+                           check=True).stdout.strip()
         matches = db_matches(df, node_ids)
         Path(a.db_yaml).parent.mkdir(parents=True, exist_ok=True)
         Path(a.db_yaml).write_text(yaml.safe_dump(
-            {"tomtom": {"version": f"MEME {v} / {Path(a.target).name}", "matches": matches},
+            {"tomtom": {"version": f"MEME {v} / {Path(a.target).name} sha256:{target_key[:12]}",
+                        "matches": matches},
              "family_level_output": True}, sort_keys=False, width=200))
         print(f"\n{a.db_yaml}: {len(matches)} gated matches proposed to mlex annotate")
 

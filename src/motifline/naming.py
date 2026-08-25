@@ -43,6 +43,7 @@ CLUSTERS = f"{LEXICON_DIR}/clusters_rsat.tsv"
 METADATA = f"{LEXICON_DIR}/lexicon_rsat.metadata.tsv"
 MEDOID_MEME = f"{LEXICON_DIR}/lexicon_rsat.meme"
 CLTAGGED = f"{LEXICON_DIR}/union_cltagged.meme"
+NCOR = f"{LEXICON_DIR}/ncor.npy"
 
 
 class NamingError(KeyError):
@@ -51,7 +52,7 @@ class NamingError(KeyError):
 
 def params(cfg: dict) -> dict:
     c = cfg.get("reference_lexicon") or {}
-    missing = [k for k in ("sources", "rsat", "tomtom", "gate") if k not in c]
+    missing = [k for k in ("sources", "rsat", "tomtom", "gate", "w_th") if k not in c]
     if missing:
         raise NamingError(f"config.reference_lexicon is missing {missing}")
     if not c["sources"]:
@@ -70,6 +71,19 @@ def source_argv(cfg: dict) -> list[str]:
     for tag, path in params(cfg)["sources"].items():
         argv += ["--source", f"{tag}={path}"]
     return argv
+
+
+def w_th(cfg: dict) -> int:
+    """Minimum comparable overlap, in columns, for the Ncor arm of the chain.
+
+    Used in two places that must not drift apart: the all-pairs Ncor that selects each
+    cluster's medoid, and the IC-core floor below which a pattern has no comparable
+    Ncor at all (and therefore fails the gate by construction). It is NOT
+    ``rsat.lth.w`` -- RSAT discards that arm under ``-quick`` -- and it is NOT TomTom's
+    ``-min-overlap``, which stays pinned to modiscolite's parameter set. Three numbers
+    that happen to be 5; only these two are this one.
+    """
+    return int(params(cfg)["w_th"])
 
 
 def gate(cfg: dict) -> tuple[float, float]:
@@ -106,8 +120,8 @@ def rsat_argv(cfg: dict, union: str, out_prefix: str) -> list[str]:
 
     A threshold ``-quick`` would discard is refused rather than passed: config has to
     state the thresholds that are actually in force, or the library's build parameters
-    are a fiction. (This is not the same number as the Ncor floor used elsewhere in the
-    naming chain -- ``motif_matrix.W_TH`` -- which is a separate, still-hardcoded 5.)
+    are a fiction. (``lth.w`` is not the Ncor floor used elsewhere in the naming chain
+    -- that one is ``reference_lexicon.w_th``, see :func:`w_th`.)
     """
     r = rsat(cfg)
     quick = r.get("quick", True)
