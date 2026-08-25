@@ -8,6 +8,8 @@ PY = f"{ENV}/bin/python"
 G = config["genome"]
 RUNS = config["runs"]
 GPUS = config["gpus"]
+LEX = config["reference_lexicon"]
+UNION = "results/lexicon/union.meme"
 
 wildcard_constraints:
     run="[^/]+",
@@ -39,7 +41,8 @@ def attr_cmd(w):
 
 rule all:
     input:
-        expand("results/{run}/hits/hits.tsv", run=RUNS)
+        expand("results/{run}/hits/hits.tsv", run=RUNS),
+        expand("results/{run}/naming/pattern_names.tsv", run=RUNS)
 
 
 rule attribute:
@@ -98,3 +101,18 @@ rule call_hits:
         "CUDA_VISIBLE_DEVICES={GPUS[0]} {ENV}/bin/finemo call-hits -M {params.f[mode]} "
         "-r {input.npz} -m {input.h5} -o {params.out} -t {params.f[threshold]} "
         "-l {params.f[alpha]} -b {params.f[batch]}"
+
+
+rule lexicon_union:
+    input: LEX["sources"]
+    output: UNION
+    shell: "{PY} {S}/lexicon_union.py --out {output} {input}"
+
+
+rule name_patterns:
+    input: h5=rules.discover.output, lex=UNION, h14=LEX["h14_annotation"]
+    output: "results/{run}/naming/pattern_names.tsv"
+    params: out="results/{run}/naming"
+    shell:
+        "{PY} {S}/name_patterns.py --h5 {input.h5} --target {input.lex} "
+        "--h14_annotation {input.h14} --tomtom {LEX[tomtom]} --out_dir {params.out}"

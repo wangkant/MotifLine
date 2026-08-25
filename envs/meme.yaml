@@ -1,0 +1,4 @@
+name: motifline-meme
+channels: [bioconda, conda-forge]
+dependencies:
+  - meme=5.5.9

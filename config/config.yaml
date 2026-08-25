@@ -32,3 +32,10 @@ finemo:
   threshold: 0.3      # --cwm-trim-threshold
   alpha: 0.7          # --global-lambda
   batch: 2000
+
+reference_lexicon:
+  sources:
+    - /path/to/hocomoco14_core.meme
+    - /path/to/jaspar2026_core_vert_nr.meme
+  h14_annotation: /path/to/H14CORE_annotation.jsonl
+  tomtom: /path/to/envs/meme/bin/tomtom
