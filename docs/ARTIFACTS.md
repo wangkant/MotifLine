@@ -112,24 +112,89 @@ the same hits at coordinates shifted by a base or two — compare hit sets with 
 `hits_v041/` and `hits_lexicon_<route>/` are **leaves**: nothing in the DAG
 consumes them.
 
-## `merge_motiflex` / `merge_motiflex_cut` → `merges/<name>/motiflex/`
+## `lexicon_*` → `results/lexicon/`
 
-The merge line's finish since 2026-08-17: two or more MoDISco h5 through
-`mlex ingest -> align -> [annotate] -> merge`, and, when the merge declares
-`cut_height`, the applied cut plus a compiled lexicon.
+The reference lexicon, built once and shared by every naming stage (2026-08-25).
+Verified against the artifacts it replaces: `lexicon_sources_union.meme`,
+`lexicon_rsat.meme` and `union_cltagged.meme` are byte-identical to the
+hand-built originals, `ncor.npy` agrees to 1.1e-15.
+
+| file | contents |
+|---|---|
+| `lexicon_sources_union.meme` | the source libraries concatenated, every matrix kept; JASPAR ids joined (`MA0004.1_Arnt`), `E= 0` added where absent |
+| `rsat/` | RSAT `matrix-clustering`'s full output tree; only `rsat/rsat_tables/clusters.tab` is consumed, the rest is that file's provenance |
+| `clusters_rsat.tsv` | flat `cluster, motif, source, is_medoid` |
+| `lexicon_rsat.meme` | one **medoid** PPM per cluster (never an average) |
+| `lexicon_rsat.metadata.tsv` | per cluster: `lexicon_id`, `size`, `medoid`, `width`, per-source counts, `min_ncor`, `tf_symbols`, `members` |
+| `union_cltagged.meme` | the union with `{lexicon_id}__` prefixed onto each name — the TomTom target |
+| `ncor.npy` | `(M, M) float64` all-pairs Ncor over the union, in source order |
+
+`E= 0` is not cosmetic: RSAT's MEME reader requires the field and drops records
+without it **silently**, so a union missing it clusters one library and looks
+like it worked.
+
+## `name_patterns` / `merge_naming` → `<run>/naming/`, `merges/<name>/naming/`
+
+| file | contents |
+|---|---|
+| `<label>_query.meme` | the patterns as queried: PPM cut to modiscolite's `|CWM|` 30%-of-max span |
+| `tomtom_<label>/` | TomTom's own output (`-mi 1` deliberately absent — against a batch query it would score only the first pattern) |
+| `pattern_names.tsv` | one row per pattern: `label, key, group, pattern, n_seqlets, trim_*, ic_core_len`, `match0..2`/`cluster0..2`/`qval0..2`/`overlap0..2`, `assigned_cluster`, `cluster_stable`, `best_ncor`, `best_ncor_match`, `annotated` |
+| `db.yaml` | (merge stages only) the gated matches as an `mlex annotate` database |
+
+`assigned_cluster` is read off the winning target's name — the cluster id is
+already there, which is what the tagged union is for. `cluster_stable` says the
+top three matches all landed in one cluster; false means the pattern itself
+straddles clusters and the assignment deserves a look.
+
+`annotated` is the two-armed gate, `qval0 < gate.qval` **and**
+`best_ncor >= gate.ncor`. `best_ncor` is a second, independent measurement: Ncor
+of the pattern's IC>0.3 core against the untagged matrices, i.e. the same
+similarity the clustering was built on, on a different trim than the TomTom
+query. Rows failing either arm are kept with `annotated=False`, are not renamed,
+and do not enter `db.yaml`. A pattern whose IC core is shorter than 5 columns has
+no comparable Ncor (`best_ncor` empty) and fails the gate by construction.
+
+Families are **not** here. Grouping cluster ids into site types is a human
+judgement made once per project; the chain stops at the cluster.
+
+## `merge_ingest` / `merge_align` / `merge_annotate` / `merge_tree` / `merge_compile` → `merges/<name>/motiflex/`
+
+Four motiflex stages plus the merge itself, which is this pipeline's since motiflex
+removed its `merge` subcommand on 2026-08-23 (commit `204cb3f`). Each stage is its own
+rule with its own declared output — before 2026-08-25 they were one rule that skipped
+stages on `.exists()` against files snakemake did not track, so a regenerated db.yaml
+rebuilt the tree from a stale registry and stale annotations.
 
 | file | contents |
 |---|---|
 | `project.yaml` | the ingest declaration this rule wrote from config — every semantic field (model, readout, union_id, widths, celltypes) explicit |
-| `registry/` | normalised motif registry: CWM, hypothetical CWM, PPM, seqlet count, trimmed core |
+| `registry/registry.json` + `registry/arrays.h5` | normalised motif registry: CWM, hypothetical CWM, PPM, seqlet count, trimmed core. Node ids are `<analysis id>::<group>_patterns.<pattern_N>` |
 | `evidence/alignment_edges.parquet` | per registered pair: similarity at the winning registration, per-pair shuffle-null empirical p |
 | `evidence/alignment_run_summary.json` | node/pair counts and exclusion reasons (`no_offset_meets_overlap_floor` marks short-core patterns that can never merge) |
-| `merge/tree.txt`, `merge/merge_nodes.csv` | the average-linkage tree over `1 - ppm_similarity`, statistics at every candidate node; **nothing merged** |
-| `merge_cut/merge_decisions.json` | each group's members, medoid representative and evidence at the declared cut |
+| `evidence/annotation_candidates.parquet` | the labels `merge_naming`'s db.yaml proposed, joined onto the registry |
+| `merge/merge_nodes.tsv` | every internal node: `height`, `n_left`/`n_right`, `mean_Ncor`/`mean_cor`/`mean_w`, `failed_arms`, `inherited_break`, `merged`. **This is what a threshold is chosen by reading.** |
+| `merge/merge_groups.tsv` | per group: `size`, `representative`, `representative_tied`, `membership` (`shared` / `<label>_only`), `min_ncor`, `n_seqlets`, `members` |
+| `merge/merge_decisions.json` | `{"merges": [{"members": [...], "representative": ...}]}` — what `mlex compile` reads. Singletons are absent: they survive as themselves |
 | `lexicons/core.h5` + `manifest.tsv` | the compiled lexicon, content-addressed, read back with the real finemo loader |
 
-The cut is a hyperparameter: it is declared per merge in config after reading
-`merge_nodes.csv`, never defaulted. Without one the line stops at the tree.
+The criterion is RSAT `matrix-clustering`'s, not a dendrogram height: a node merges
+only when the **mean cross-pair** value of **every** arm (`Ncor`, `cor`, `w`, all read
+at one registration) clears its threshold, and a node that fails breaks the chain for
+its ancestors rather than being re-tested (`TFBMclust/R/check_alignment.R:80-81,
+106-109`; `align.motifs.R:101`). A group is therefore a maximal subtree in which every
+internal node passed every arm.
+
+`representative_tied` is not decoration. The representative is the medoid by mean
+within-group distance, but for a two-member group both members have the same mean
+distance by construction, so the medoid carries no information and the tie-break
+(seqlet count, then node id) decides. A tied representative must not be read as "the
+most typical member".
+
+The thresholds are a hyperparameter: declared per merge in config after reading
+`merge_nodes.tsv`, never defaulted. Without them the line stops at the annotated
+registry. A merge that still declares the old `cut_height` is refused — it was the
+parameter of a stage that no longer exists and does not map onto this criterion.
 
 ## `merge_cross_regions` / `merge_cross_call` / `merge_occupancy` → `merges/<name>/motiflex/{cross_call,occupancy}/`
 

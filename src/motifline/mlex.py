@@ -6,13 +6,23 @@ Since 2026-08-17 this is how the merge line ends; MotifCompendium
 as the comparison arm but is no longer in the default DAG.
 
 The merge definitions are the SAME ``compendium.merges`` entries -- what to merge
-is one question and both tools answer it over the same leaves. What differs is the
-finish: ``mlex`` builds an average-linkage tree over 1 - ppm_similarity with a
-per-pair shuffle null and merges NOTHING until a ``cut_height`` is declared on the
-merge; the cut is a hyperparameter and belongs in config, next to the merge it
-cuts, not in code. With a cut the group representatives are medoids -- observed
-patterns, never cross-model averages -- and ``mlex compile`` writes a lexicon
-verified by reading it back with the real finemo loader.
+is one question and both tools answer it over the same leaves.
+
+**2026-08-25.** motiflex removed its ``merge`` subcommand on 2026-08-23 (commit
+204cb3f) when it repositioned as an auditor of someone else's consolidation: ``mlex
+selectivity`` now scores "any tool's merge" and ``mlex compile --decisions`` reads a
+decisions JSON "from any tool". So the merging itself moved here --
+``steps/merge_tree.py`` -- while ingest, align, annotate and compile stay with mlex.
+
+The criterion moved with it, and changed. ``mlex merge`` cut an average-linkage tree
+over ``1 - ppm_similarity`` at one scalar ``cut_height``. The merge now uses the rule
+the established motif-clustering software uses, RSAT ``matrix-clustering``: a node
+merges only when the MEAN cross-pair value of EVERY declared arm (Ncor, cor, w, read
+at one registration) clears its threshold, and a node that fails breaks the chain for
+its ancestors rather than being re-tested. The hyperparameter is therefore a set of
+thresholds, declared per merge in config next to the merge it cuts, never defaulted.
+Representatives stay medoids -- observed patterns, never cross-model averages -- and
+``mlex compile`` still verifies the written lexicon with the real finemo loader.
 
 ``mlex ingest`` refuses semantics it would have to guess (its BA-11 rule), so a
 leaf must supply more than an h5: attributions, one-hot, regions, and the model
@@ -51,15 +61,56 @@ def params(cfg: dict) -> dict:
     return c
 
 
-def cut_height(cfg: dict, name: str):
-    """The declared cut for a merge, or None: tree only, nothing merged."""
-    h = comp.merge_def(cfg, name).get("cut_height")
-    return None if h is None else float(h)
+#: The arms of the merge criterion, in report order. Same three RSAT thresholds on.
+MERGE_ARMS = ("Ncor", "cor", "w")
 
 
-def db_yaml(cfg: dict, name: str):
-    """Optional precomputed database labels for ``mlex annotate``; None skips it."""
-    return comp.merge_def(cfg, name).get("db_yaml")
+def thresholds(cfg: dict, name: str):
+    """The merge criterion for a merge, or None: registry and evidence only, no groups.
+
+    Replaces ``cut_height`` (2026-08-25). ``mlex merge``, which cut an average-linkage
+    tree over ``1 - ppm_similarity`` at one scalar height, was removed from motiflex on
+    2026-08-23; the merging is now done here by ``steps/merge_tree.py`` under the
+    criterion RSAT ``matrix-clustering`` uses -- a node merges only if the MEAN
+    cross-pair value of EVERY declared arm clears its threshold. So the hyperparameter
+    is a set of thresholds, not a height, and a config that still declares ``cut_height``
+    is refused rather than reinterpreted: 0.05 on ``1 - ppm_similarity`` has no image
+    under the new criterion, and silently mapping it to something would be a made-up
+    operating point.
+    """
+    d = comp.merge_def(cfg, name)
+    if "cut_height" in d:
+        raise MlexError(
+            f"merge {name!r} declares cut_height={d['cut_height']}, which was the "
+            f"parameter of the removed `mlex merge` stage. The criterion is now "
+            f"thresholds: {{{', '.join(MERGE_ARMS)}}} -- pick an operating point from a "
+            f"sweep of merge_nodes.tsv and declare it; it is not derivable from a height.")
+    t = d.get("thresholds")
+    if t is None:
+        return None
+    missing = [k for k in MERGE_ARMS if k not in t]
+    if missing:
+        raise MlexError(
+            f"merge {name!r}: thresholds is missing {missing}; every arm is required "
+            f"because the criterion is their conjunction -- an absent arm is not 'off', "
+            f"it is an undeclared threshold")
+    return {k: float(t[k]) for k in MERGE_ARMS}
+
+
+def db_yaml(cfg: dict, name: str) -> str:
+    """The precomputed database ``mlex annotate`` reads for this merge.
+
+    Since 2026-08-25 this defaults to the merge's own naming stage output rather than
+    to nothing: the annotate step used to be skipped for every merge, because no merge
+    declared a ``db_yaml`` and there was no stage that produced one. It is now built by
+    ``rule merge_naming`` from the project's one reference lexicon, so both leaves of a
+    merge are labelled from the same library and at the same gate.
+
+    A merge may still override with an explicit path -- an annotation computed
+    elsewhere, or a frozen one -- and then that file has to exist; nothing generates it.
+    """
+    from motifline import naming
+    return comp.merge_def(cfg, name).get("db_yaml") or naming.merge_db_yaml(name)
 
 
 def _run_analysis(cfg: dict, name: str, label: str, run_name: str) -> dict:

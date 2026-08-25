@@ -10,6 +10,20 @@ ag_src: /path/to/kant/models/alphagenome-pytorch-deeplift/src
 genome:
   fasta: /path/to/kant/data/genome/hg38.fa
   chrom_sizes: /path/to/kant/data/genome/hg38.chrom.sizes
+
+# Canonical attribution geometry: each model attributes its OWN native window and
+# stores all of it. AG's 2048 is its input floor (16 x 128bp trunk bins), CBP's 2114 is
+# its training input; neither is cropped to meet the other. A run may override these --
+# the adopted runs below do, because their archives were computed at AG 16384 -> crop
+# 2114 -- but an unspecified run gets these. Rationale: src/motifline/geometry.py.
+# REQUIRED: geometry() reads this block before it looks at a run's own in_window, so a
+# config without it raises on every geometry-dependent rule.
+geometry:
+  cbp:
+    in_window: 2114
+  ag:
+    in_window: 2048
+    crop: 2048         # == in_window: nothing to crop at the native width
 runs:
   k562_cbp_slice500:
     model: cbp
@@ -118,6 +132,17 @@ runs:
     lexicon_hits:                 # archived per-route hits for this context
       gw: /path/to/kant/new_experiment/region_v4/05_allcluster_lexicon/hits_gw/cbp/cl1/finemo_hits/hits.tsv
       mmv: /path/to/kant/new_experiment/region_v4/05_allcluster_lexicon/hits_mmv/cbp/cl1/finemo_hits/hits.tsv
+  # AG at its NATIVE 2048bp window, not the 16384->2114 crop k562_ag_adopted uses.
+  # Same regions as the CBP side, so the two runs pair row-for-row; this is the run
+  # `lexicons.routes.*.ag2048` names.
+  k562_ag2048_adopted:
+    model: ag
+    adopt_from: /path/to/kant/new_experiment/region_v4/02_motif_grammar/interpret_ag2048_par_hyp/k562
+    adopt_peaks: peaks.bed
+    rows: 33917
+    in_window: 2048
+    crop: 2048
+    old_modisco: /path/to/kant/new_experiment/region_v4/02_motif_grammar/interpret_ag2048_par_hyp/k562/modisco.h5
   gm12878_ag_adopted:
     model: ag
     adopt_from: /path/to/kant/new_experiment/region_v3/gm12878/interpret_ag_par_hyp
@@ -141,6 +166,41 @@ finemo:
   alpha: 0.7             # -l/--global-lambda, official default
   batch: 2000            # -b, official default (vertical slice ran 1000)
   # -s 3.0, -i 0.08, -j 0.7, -c 5e-4, -S 10000 left unset = official defaults
+
+# Reference lexicon: where pattern NAMES come from (2026-08-25). Not to be confused
+# with `lexicons:` below, which is about which motifs finemo scores against -- this
+# block never touches hit calling. Rationale: src/motifline/naming.py.
+#
+# sources -> union -> RSAT clustering -> medoid library + cluster-tagged union ->
+# TomTom -> two-armed gate. The libraries are the publishers' non-redundant releases
+# (HOCOMOCO H14CORE 1595 + JASPAR CORE vertebrates NR 1019 = 2614 matrices); they are
+# NOT de-duplicated further, because the match target has to be the full set.
+reference_lexicon:
+  sources:
+    H14: /path/to/hocomoco14_core.meme
+    JAS: /path/to/jaspar2026_core_vert_nr.meme
+  rsat:
+    bin: /path/to/envs/rsat/bin/rsat
+    hclust_method: average
+    metric: Ncor
+    # RSAT standalone defaults these to EMPTY; the values below are the web server's
+    # documented defaults and have to be passed explicitly or the clustering differs.
+    # ONLY these two: under `-quick` RSAT rewrites %lth to {Ncor, cor} and discards
+    # every other arm (matrix-clustering:2249-2257). Verified live -- a run given
+    # `-lth w 5` alongside them reaches the R script as `lthsp = 'Ncor_0.55_cor_0.75_'`.
+    # Declaring `w` here is refused rather than silently dropped. The Ncor comparability
+    # floor used elsewhere in the naming chain is a different number
+    # (motif_matrix.W_TH = 5, still hardcoded).
+    lth:
+      cor: 0.75
+      Ncor: 0.55
+    quick: true
+  tomtom: /path/to/envs/meme/bin/tomtom
+  # Both arms required. ncor is set to rsat.lth.Ncor on purpose: "annotated" then means
+  # the clustering itself would have merged the pattern with its match.
+  gate:
+    qval: 0.05
+    ncor: 0.55
 
 # External-lexicon hit calling: `-m` points at an archived lexicon instead of the
 # run's own modisco.h5. Paths transcribed from
@@ -167,7 +227,7 @@ lexicons:
 
 # Cross-model merges. What to merge is defined once (compendium.merges); how the
 # line FINISHES is motiflex (2026-08-17): every merge gets an annotated mlex tree,
-# and a merge that declares cut_height also gets a compiled medoid lexicon, which
+# and a merge that declares `thresholds` also gets a compiled medoid lexicon, which
 # is then cross-called back over every leaf (finemo, the leaf's own regions at its
 # native width) and reduced to occupancy / cross-leaf agreement tables (2026-08-20).
 # MotifCompendium remains the explicit-target comparison arm (rule merge_compendium),
@@ -184,9 +244,14 @@ compendium:
   quality_stats: true
   merges:
     # <name>:
-    #   cut_height: 0.05     # motiflex finish; omit -> tree only, nothing merged
+    #   thresholds:          # the merge criterion; omit -> registry+evidence only
+    #     Ncor: 0.55         # RSAT matrix-clustering's rule: a node merges only when
+    #     cor: 0.75          # the MEAN cross-pair value of EVERY arm clears its
+    #     w: 5               # threshold, and a failed node breaks the chain above it.
     #   region_width: 500    # MC arm only
-    #   db_yaml: /path/db.yaml   # optional precomputed TomTom labels for mlex annotate
+    #   db_yaml: /path/db.yaml   # optional: freeze the labels mlex annotate proposes.
+    #                            # Default = results/merges/<name>/naming/db.yaml,
+    #                            # built by rule merge_naming from reference_lexicon.
     #   leaves:
     #     <label>: {run: <run name>}                       # this pipeline's own run
     #     <label>: {h5: ..., attr: ..., ohe: ..., bed: ..., # external leaf: declared,

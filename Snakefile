@@ -8,6 +8,7 @@ configfile: "config/default.yaml"
 
 from motifline import compendium as comp
 from motifline import mlex as mlx
+from motifline import naming as nm
 from motifline.geometry import attr_width, geometry
 from motifline.lexicons import lexicon_batch, lexicon_path
 from motifline.runs import active_runs, cancelled_runs
@@ -88,14 +89,17 @@ CROSS_VERSION = sorted(k for k, v in config["runs"].items() if v.get("cross_vers
 LEXICON_ROUTES = sorted((config.get("lexicons") or {}).get("routes") or {})
 # Cross-model merges: two MoDISco h5 (CBP 2114 + AG 2048) -> one merged lexicon.
 # The finish is motiflex (2026-08-17): every merge gets an annotated tree; the ones
-# that declare a cut_height also get a compiled lexicon. MotifCompendium stays as
+# that declare `thresholds` also get a compiled lexicon. MotifCompendium stays as
 # the explicit-target comparison arm (rule merge_compendium).
 MERGES = comp.merge_names(config)
-MERGE_CUT = sorted(m for m in MERGES if mlx.cut_height(config, m) is not None)
+# A merge that declares `thresholds` gets merged and compiled; one that does not stops
+# at the registry and the alignment evidence. (Before 2026-08-25 the hyperparameter was
+# `cut_height`, applied by the `mlex merge` stage motiflex has since removed.)
+MERGE_GATED = sorted(m for m in MERGES if mlx.thresholds(config, m) is not None)
 # A compiled merge is cross-called back over every leaf: the SAME lexicon scanned
 # over each model's own regions (rule merge_cross_call), then reduced to per-motif
 # occupancy / cross-leaf agreement (rule merge_occupancy).
-MERGE_LEAVES = sorted({l for m in MERGE_CUT for l in mlx.leaf_labels(config, m)})
+MERGE_LEAVES = sorted({l for m in MERGE_GATED for l in mlx.leaf_labels(config, m)})
 
 
 def _alt(names):
@@ -114,18 +118,23 @@ rule all:
     input:
         expand("results/{run}/hits/hits.tsv",
                run=active_runs(config, sorted(config["runs"]))),
+        # every run's patterns named from the one reference lexicon (2026-08-25)
+        expand("results/{run}/naming/pattern_names.tsv",
+               run=active_runs(config, sorted(config["runs"]))),
         # finemo 0.30 vs 0.41 on one and the same regions.npz + modisco.h5
         expand("results/{run}/hits_v041/hits.tsv",
                run=active_runs(config, CROSS_VERSION)),
         # external-lexicon routes
         expand("results/{run}/hits_lexicon_{route}/hits.tsv",
                run=active_runs(config, LEXICON_RUNS), route=LEXICON_ROUTES),
-        # cross-model merges: every merge builds its motiflex tree; a merge with
-        # cut_height also compiles a shared lexicon, which is then cross-called
-        # over every leaf and reduced to occupancy/agreement tables.
-        expand("results/merges/{merge}/motiflex/merge/tree.txt", merge=MERGES),
-        expand("results/merges/{merge}/motiflex/lexicons/core.h5", merge=MERGE_CUT),
-        expand("results/merges/{merge}/motiflex/occupancy/agreement.tsv", merge=MERGE_CUT)
+        # cross-model merges: every merge builds its annotated registry; a merge that
+        # declares `thresholds` is also merged and compiled into one shared lexicon,
+        # which is cross-called over every leaf and reduced to occupancy/agreement.
+        expand("results/merges/{merge}/motiflex/evidence/annotation_candidates.parquet",
+               merge=MERGES),
+        expand("results/merges/{merge}/motiflex/merge/merge_groups.tsv", merge=MERGE_GATED),
+        expand("results/merges/{merge}/motiflex/lexicons/core.h5", merge=MERGE_GATED),
+        expand("results/merges/{merge}/motiflex/occupancy/agreement.tsv", merge=MERGE_GATED)
 
 rule import_attr:
     """Adopt archived attributions: symlink attr/ohe, normalize peaks -> regions.bed."""
@@ -268,6 +277,102 @@ rule call_hits_lexicon:
                 "-b", str(batch)]
         run_body(out, argv)
 
+# ---------------------------------------------------------------------------
+# Reference lexicon and pattern naming (2026-08-25). One library, built once, for
+# every run and every merge in this pipeline; rationale in src/motifline/naming.py.
+# The RSAT clustering is the expensive step -- 1h46m on 2614 matrices, measured
+# 2026-08-25 -- and it is the only one; everything downstream is minutes and is cached
+# by snakemake as usual.
+# ---------------------------------------------------------------------------
+
+rule lexicon_union:
+    """Source libraries -> one union MEME, matrices untouched (E= 0 added for RSAT)."""
+    input: lambda w: nm.source_paths(config)
+    output: nm.UNION
+    run:
+        argv = [PY, str(STEPS / "lexicon_union.py"), *nm.source_argv(config),
+                "--out", output[0]]
+        run_body(Path(output[0]).parent, argv)
+
+rule lexicon_rsat:
+    """RSAT matrix-clustering over the union: THE partition, computed by RSAT itself.
+
+    The thresholds are passed explicitly (naming.rsat_argv explains why) and are the
+    web server's documented defaults; standalone leaves them empty, which is not the
+    same clustering. Only rsat_tables/clusters.tab is consumed downstream -- the rest
+    of RSAT's output tree is kept where it lands, as the provenance for that file.
+    """
+    input: nm.UNION
+    output: nm.CLUSTERS_TAB
+    run:
+        out = nm.RSAT_DIR
+        os.makedirs(out, exist_ok=True)
+        rsat_bin = Path(nm.rsat(config)["bin"]).parent
+        run_body(out, nm.rsat_argv(config, input[0], f"{out}/rsat"),
+                 env={"PATH": f"{rsat_bin}:{os.environ['PATH']}"})
+
+rule lexicon_medoid:
+    """One medoid per RSAT cluster -> the compact reference library (+ the Ncor cache)."""
+    input: tab=nm.CLUSTERS_TAB, sources=lambda w: nm.source_paths(config)
+    output: nm.MEDOID_MEME, nm.METADATA, nm.CLUSTERS
+    run:
+        argv = [PY, str(STEPS / "lexicon_medoid.py"), "--clusters_tab", input.tab,
+                *nm.source_argv(config), "--out_dir", nm.LEXICON_DIR]
+        run_body(nm.LEXICON_DIR, argv, env=COMPUTE_THREADS)
+
+rule lexicon_cltagged:
+    """The union with cluster ids prefixed onto the names: the TomTom target."""
+    input: union=nm.UNION, clusters=nm.CLUSTERS, metadata=nm.METADATA
+    output: nm.CLTAGGED
+    run:
+        argv = [PY, str(STEPS / "lexicon_cltagged.py"), "--union", input.union,
+                "--clusters", input.clusters, "--metadata", input.metadata,
+                "--out", output[0]]
+        run_body(nm.LEXICON_DIR, argv)
+
+rule name_patterns:
+    """One run's MoDISco patterns -> cluster-level names, with the gate applied."""
+    input: h5="results/{run}/modisco/modisco.h5",
+           lex=lambda w: nm.naming_inputs(config)
+    output: nm.run_names("{run}")
+    # constrained to declared run names so that a merge's naming directory, which has
+    # the same shape, can only ever be built by rule merge_naming
+    wildcard_constraints: run=_alt(sorted(config["runs"]))
+    run:
+        q, ncor = nm.gate(config)
+        out = f"results/{wildcards.run}/naming"
+        argv = [PY, str(STEPS / "name_patterns.py"),
+                "--h5", f"{wildcards.run}={input.h5}",
+                "--target", nm.CLTAGGED, *nm.source_argv(config),
+                "--tomtom", nm.params(config)["tomtom"],
+                "--gate_q", str(q), "--gate_ncor", str(ncor), "--out_dir", out]
+        run_body(out, argv, env=COMPUTE_THREADS)
+
+rule merge_naming:
+    """Every leaf of a merge named from the same library, and the mlex annotate database.
+
+    One stage over all leaves rather than one per leaf: `mlex annotate` reads a single
+    database file whose node ids span the merge, and running the leaves together is what
+    guarantees they were gated identically.
+    """
+    input: h5=lambda w: comp.dag_inputs(config, w.merge),
+           lex=lambda w: nm.naming_inputs(config)
+    output: nm.merge_names("{merge}"), nm.merge_db_yaml("{merge}")
+    wildcard_constraints: merge=_alt(MERGES)
+    run:
+        q, ncor = nm.gate(config)
+        merge = wildcards.merge
+        out = f"results/merges/{merge}/naming"
+        argv = [PY, str(STEPS / "name_patterns.py"),
+                "--target", nm.CLTAGGED, *nm.source_argv(config),
+                "--tomtom", nm.params(config)["tomtom"],
+                "--gate_q", str(q), "--gate_ncor", str(ncor),
+                "--out_dir", out, "--db_yaml", nm.merge_db_yaml(merge)]
+        for label, h5 in nm.merge_leaf_h5(config, merge):
+            argv += ["--h5", f"{label}={h5}",
+                     "--node_id", f"{label}={nm.node_prefix(merge, label)}"]
+        run_body(out, argv, env=COMPUTE_THREADS)
+
 rule merge_compendium:
     """Two or more MoDISco h5 -> ONE MotifCompendium lexicon (comparison arm).
 
@@ -308,68 +413,104 @@ rule merge_compendium:
             argv += ["--modisco", f"{label}={h5}"]
         run_body(out, argv, env=COMPUTE_THREADS)
 
-rule merge_motiflex:
-    """N MoDISco h5 -> motiflex registry / alignment evidence / annotated merge TREE.
+MOTIFLEX = "results/merges/{merge}/motiflex"
 
-    Nothing merges here by design: `mlex merge` without a cut writes the
-    average-linkage tree (1 - ppm_similarity, per-pair shuffle null) with the
-    statistics at every node. The cut is a hyperparameter, declared per merge as
-    `cut_height` and applied by rule merge_motiflex_cut; it is chosen by reading
-    merge/merge_nodes.csv and tree.txt, never defaulted.
+rule merge_ingest:
+    """N MoDISco h5 -> the normalised motif registry (`mlex ingest`).
 
-    Runs the mlex CLI from config.motiflex.mlex (envs/mmv_verify); CPU only.
-    Stage bodies skip existing output, so an interrupted build resumes.
+    Split out of the old single merge rule on 2026-08-25 so that each mlex stage is a
+    real snakemake output. The previous body guarded each stage on `.exists()` against
+    files snakemake did not track, which meant a re-generated db.yaml or project.yaml
+    rebuilt the tree from a stale registry and stale annotations.
     """
-    input: lambda w: comp.dag_inputs(config, w.merge)
-    output: "results/merges/{merge}/motiflex/merge/tree.txt",
-            "results/merges/{merge}/motiflex/merge/merge_nodes.csv"
+    input: h5=lambda w: comp.dag_inputs(config, w.merge)
+    output: registry=f"{MOTIFLEX}/registry/registry.json",
+            project=f"{MOTIFLEX}/project.yaml"
     wildcard_constraints: merge=_alt(MERGES)
     run:
         import yaml
         c = mlx.params(config)
-        out = Path(f"results/merges/{wildcards.merge}/motiflex")
+        out = Path(MOTIFLEX.format(merge=wildcards.merge))
         out.mkdir(parents=True, exist_ok=True)
-        (out / "project.yaml").write_text(
+        Path(output.project).write_text(
             yaml.safe_dump(mlx.project(config, wildcards.merge), sort_keys=False, width=200))
-        seed = c.get("seed", 42)
-        if not (out / "registry/registry.json").exists():
-            run_body(out, [c["mlex"], "ingest", out / "project.yaml",
-                           "--seed", seed, "--out", out / "registry"])
-        if not (out / "evidence/alignment_edges.parquet").exists():
-            run_body(out, [c["mlex"], "align", out / "registry", "--out", out / "evidence",
-                           "--workers", c.get("workers", 8), "--seed", seed])
-        db = mlx.db_yaml(config, wildcards.merge)
-        if db and not (out / "evidence/annotation_candidates.parquet").exists():
-            run_body(out, [c["mlex"], "annotate", out / "evidence",
-                           "--registry", out / "registry",
-                           "--tomtom", "--databases", db, "--out", out / "evidence"])
-        run_body(out, [c["mlex"], "merge", out / "evidence",
-                       "--alignment", out / "evidence",
-                       "--registry", out / "registry", "--out", out / "merge"])
+        run_body(out, [c["mlex"], "ingest", output.project,
+                       "--seed", c.get("seed", 42), "--out", out / "registry"])
 
-rule merge_motiflex_cut:
-    """Apply the merge's declared cut_height; compile the shared lexicon.
-
-    Group representatives are medoids -- observed patterns, never cross-model
-    averages -- and compile reads the written lexicon back with the real finemo
-    loader (--verify-roundtrip auto). merge_cut/merge_decisions.json records each
-    group's members, representative and evidence.
-    """
-    input: "results/merges/{merge}/motiflex/merge/tree.txt"
-    output: "results/merges/{merge}/motiflex/lexicons/core.h5",
-            "results/merges/{merge}/motiflex/lexicons/manifest.tsv",
-            "results/merges/{merge}/motiflex/merge_cut/merge_decisions.json"
-    wildcard_constraints: merge=_alt(MERGE_CUT)
+rule merge_align:
+    """Pairwise alignment evidence over the registry (`mlex align`)."""
+    input: f"{MOTIFLEX}/registry/registry.json"
+    output: f"{MOTIFLEX}/evidence/alignment_edges.parquet"
+    wildcard_constraints: merge=_alt(MERGES)
     run:
         c = mlx.params(config)
-        out = Path(f"results/merges/{wildcards.merge}/motiflex")
-        run_body(out, [c["mlex"], "merge", out / "evidence",
-                       "--alignment", out / "evidence",
+        out = Path(MOTIFLEX.format(merge=wildcards.merge))
+        run_body(out, [c["mlex"], "align", out / "registry", "--out", out / "evidence",
+                       "--workers", c.get("workers", 8), "--seed", c.get("seed", 42)])
+
+rule merge_annotate:
+    """Attach the reference lexicon's labels to the registry (`mlex annotate`).
+
+    The database is this pipeline's own naming stage output (rule merge_naming), so
+    both leaves are labelled from one library at one gate.
+    """
+    input: registry=f"{MOTIFLEX}/registry/registry.json",
+           evidence=f"{MOTIFLEX}/evidence/alignment_edges.parquet",
+           db=lambda w: mlx.db_yaml(config, w.merge)
+    output: f"{MOTIFLEX}/evidence/annotation_candidates.parquet"
+    wildcard_constraints: merge=_alt(MERGES)
+    run:
+        c = mlx.params(config)
+        out = Path(MOTIFLEX.format(merge=wildcards.merge))
+        run_body(out, [c["mlex"], "annotate", out / "evidence",
                        "--registry", out / "registry",
-                       "--cut-height", mlx.cut_height(config, wildcards.merge),
-                       "--out", out / "merge_cut"])
+                       "--tomtom", "--databases", input.db, "--out", out / "evidence"])
+
+rule merge_tree:
+    """The merge itself: RSAT matrix-clustering's criterion over the registry.
+
+    This is the stage motiflex removed on 2026-08-23 (commit 204cb3f) when it
+    repositioned as an auditor of someone else's consolidation -- `mlex compile
+    --decisions` takes a decisions JSON "from any tool", and this is that tool.
+
+    A node merges only when the MEAN cross-pair value of EVERY arm (Ncor, cor, w, all
+    read at one registration) clears its threshold, and a failed node breaks the chain
+    for its ancestors: `TFBMclust/R/check_alignment.R:80-81,106-109` and
+    `align.motifs.R:101`. The thresholds are declared per merge and never defaulted,
+    chosen by reading merge/merge_nodes.tsv -- the same policy the old `cut_height` had.
+    """
+    input: registry=f"{MOTIFLEX}/registry/registry.json",
+           annotation=f"{MOTIFLEX}/evidence/annotation_candidates.parquet"
+    output: decisions=f"{MOTIFLEX}/merge/merge_decisions.json",
+            groups=f"{MOTIFLEX}/merge/merge_groups.tsv",
+            nodes=f"{MOTIFLEX}/merge/merge_nodes.tsv"
+    wildcard_constraints: merge=_alt(MERGE_GATED)
+    run:
+        out = Path(MOTIFLEX.format(merge=wildcards.merge))
+        t = mlx.thresholds(config, wildcards.merge)
+        argv = [PY, str(STEPS / "merge_tree.py"), "--registry", out / "registry",
+                "--out_dir", out / "merge"]
+        for arm, value in t.items():
+            argv += [f"--{arm}", str(value)]
+        run_body(out / "merge", argv, env=COMPUTE_THREADS)
+
+rule merge_compile:
+    """Compile the merged groups into one finemo-callable lexicon (`mlex compile`).
+
+    Group representatives are medoids -- observed patterns, never cross-model averages
+    -- and compile reads the written lexicon back with the real finemo loader
+    (`--verify-roundtrip auto`).
+    """
+    input: registry=f"{MOTIFLEX}/registry/registry.json",
+           decisions=f"{MOTIFLEX}/merge/merge_decisions.json"
+    output: f"{MOTIFLEX}/lexicons/core.h5",
+            f"{MOTIFLEX}/lexicons/manifest.tsv"
+    wildcard_constraints: merge=_alt(MERGE_GATED)
+    run:
+        c = mlx.params(config)
+        out = Path(MOTIFLEX.format(merge=wildcards.merge))
         run_body(out, [c["mlex"], "compile", out / "registry",
-                       "--decisions", out / "merge_cut/merge_decisions.json",
+                       "--decisions", input.decisions,
                        "--tiers", "core", "--verify-roundtrip", "auto",
                        "--seed", c.get("seed", 42), "--out", out / "lexicons"])
 
@@ -382,7 +523,7 @@ rule merge_cross_regions:
     """
     input: lambda w: mlx.cross_call_inputs(config, w.merge, w.leaf)
     output: "results/merges/{merge}/motiflex/cross_call/{leaf}/regions.npz"
-    wildcard_constraints: merge=_alt(MERGE_CUT), leaf=_alt(MERGE_LEAVES)
+    wildcard_constraints: merge=_alt(MERGE_GATED), leaf=_alt(MERGE_LEAVES)
     run:
         l = mlx.cross_call_leaf(config, wildcards.merge, wildcards.leaf)
         out = f"results/merges/{wildcards.merge}/motiflex/cross_call/{wildcards.leaf}"
@@ -403,7 +544,7 @@ rule merge_cross_call:
     input: npz="results/merges/{merge}/motiflex/cross_call/{leaf}/regions.npz",
            lex="results/merges/{merge}/motiflex/lexicons/core.h5"
     output: "results/merges/{merge}/motiflex/cross_call/{leaf}/hits.tsv"
-    wildcard_constraints: merge=_alt(MERGE_CUT), leaf=_alt(MERGE_LEAVES)
+    wildcard_constraints: merge=_alt(MERGE_GATED), leaf=_alt(MERGE_LEAVES)
     resources: gpu=1
     run:
         out = f"results/merges/{wildcards.merge}/motiflex/cross_call/{wildcards.leaf}"
@@ -426,7 +567,7 @@ rule merge_occupancy:
         manifest="results/merges/{merge}/motiflex/lexicons/manifest.tsv"
     output: "results/merges/{merge}/motiflex/occupancy/occupancy.tsv",
             "results/merges/{merge}/motiflex/occupancy/agreement.tsv"
-    wildcard_constraints: merge=_alt(MERGE_CUT)
+    wildcard_constraints: merge=_alt(MERGE_GATED)
     run:
         out = f"results/merges/{wildcards.merge}/motiflex/occupancy"
         argv = [PY, str(STEPS / "merge_occupancy.py"),
