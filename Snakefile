@@ -1,22 +1,30 @@
-# Snakefile
+# Snakefile -- one line per run:
+#
+#     attribute (cbp | ag | star)  ->  discover  ->  extract_regions  ->  call_hits
+#                                            \->  name_patterns
+#     built once:  lexicon_union -> lexicon_rsat -> lexicon_medoid -> lexicon_cltagged
+#
+# The cross-model merge (motiflex / MotifCompendium), the external-lexicon routes and
+# the finemo 0.30-vs-0.41 arm were removed on 2026-09-07 (branch `linear`); git history
+# before that commit has them. `geometry.py` went with them: an attribution's width is
+# read off the array (attr_width below), not derived from config.
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
+
 configfile: "config/default.yaml"
 
-from motifline import compendium as comp
-from motifline import mlex as mlx
 from motifline import naming as nm
-from motifline.geometry import attr_width, geometry
-from motifline.lexicons import lexicon_batch, lexicon_path
 from motifline.runs import active_runs, cancelled_runs
 
 ENV = config["envs"]["compute"]
 PY = f"{ENV}/bin/python"
-ENV_ALT = config["envs"]["finemo_alt"]                 # second finemo, comparison only
+# GPN-Star runs in its own env: its torch (2.6.0+cu124) is not the compute env's.
+PY_STAR = f"{config['envs']['star']}/bin/python"
 STEPS = Path(workflow.basedir) / "src/motifline/steps"
 
 def rundef(w):
@@ -36,39 +44,18 @@ def param_sig(**kv):
 
 
 def sig_import_attr(w):
+    # `width` is the run's declared width, kept in the signature so that finished
+    # adopted runs are not re-imported (and their hours of MoDISco re-run) just because
+    # geometry.py went away; nothing reads it.
     r = rundef(w)
-    return param_sig(src=r["adopt_from"], rows=r["rows"], width=attr_width(config, r),
+    return param_sig(src=r["adopt_from"], rows=r["rows"],
+                     width=int(r.get("crop", r.get("in_window"))),
                      peaks=r.get("adopt_peaks", "peaks.bed"))
 
 
 def sig_naming(w=None):
     return param_sig(gate=nm.gate(config), tomtom=nm.params(config)["tomtom"],
                      w_th=nm.w_th(config))
-
-
-def sig_merge_naming(w):
-    return param_sig(gate=nm.gate(config), tomtom=nm.params(config)["tomtom"],
-                     w_th=nm.w_th(config),
-                     leaves=[l for l, _ in nm.merge_leaf_h5(config, w.merge)])
-
-
-def sig_merge_ingest(w):
-    return param_sig(project=mlx.project(config, w.merge),
-                     seed=mlx.params(config).get("seed", 42))
-
-
-def sig_merge_align(w=None):
-    c = mlx.params(config)
-    return param_sig(workers=c.get("workers", 8), seed=c.get("seed", 42))
-
-
-def sig_cross_regions(w):
-    return param_sig(width=mlx.cross_call_leaf(config, w.merge, w.leaf)["width"])
-
-
-def sig_compendium(w):
-    return param_sig(compendium=comp.params(config),
-                     region_width=comp.region_width(config, w.merge))
 
 
 def run_body(out_dir, argv, env=None):
@@ -86,32 +73,64 @@ COMPUTE_THREADS = {k: "8" for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENB
                                     "NUMEXPR_NUM_THREADS", "TORCH_NUM_THREADS",
                                     "NUMBA_NUM_THREADS")}
 
+
+def attr_width(run):
+    """Width of a run's saved attributions, read off the array itself.
+
+    Replaces geometry.py (2026-09-07): the width used to be a config-derived number
+    that had to be kept equal to what the arrays actually were. Reading it from
+    attr.npy cannot drift. It exists only once the attr stage does, so it is called
+    inside rule bodies, never in ``input:``/``params:``.
+    """
+    return int(np.load(f"results/{run}/attr/attr.npy", mmap_mode="r").shape[-1])
+
+
 def attr_argv(r, out, shard_i=None):
-    """Model-dispatched attribution command line; both steps write attr/ohe/regions.bed
-    (``attr_<i>.npy``/... when a shard index is given)."""
-    g = geometry(config, r)
-    att = config["attribution"]
-    n_shuffles = str(r.get("n_shuffles", att["n_shuffles"]))
-    random_state = str(r.get("random_state", att["random_state"]))
-    if r["model"] == "ag":
+    """Model-dispatched attribution command line; every step writes attr/ohe/regions.bed
+    (``attr_<i>.npy``/... when a shard index is given).
+
+    Window sizes are passed only when the run entry declares them; otherwise the step's
+    own defaults apply (cbp 2114; ag 2048 in / 2048 stored; star 1536).
+    """
+    model = r["model"]
+    if model in ("cbp", "ag"):
+        att = config["attribution"]
+        n_shuffles = str(r.get("n_shuffles", att["n_shuffles"]))
+        random_state = str(r.get("random_state", att["random_state"]))
+    if model == "ag":
         argv = [PY, str(STEPS / "attr_ag.py"),
                 "--ag_src", r["ag_src"], "--chrombpnet_src", config["chrombpnet_src"],
                 "--weights", r["weights"], "--peaks", r["peaks"],
                 "--fasta", config["genome"]["fasta"],
                 "--chrom_sizes", config["genome"]["chrom_sizes"],
                 "--out_dir", out, "--track", str(r["track"]),
-                "--in_window", str(g["in_window"]), "--crop", str(g["crop"]),
                 "--n_shuffles", n_shuffles, "--chunk", str(r["chunk"]),
                 "--random_state", random_state, "--hypothetical"]
-    elif r["model"] == "cbp":
+        for k in ("in_window", "crop"):
+            if k in r:
+                argv += [f"--{k}", str(r[k])]
+    elif model == "cbp":
         argv = [PY, str(STEPS / "attr_cbp.py"), "--chrombpnet_src", config["chrombpnet_src"],
                 "--wo_bias", r["wo_bias"], "--peaks", r["peaks"],
                 "--fasta", config["genome"]["fasta"],
                 "--chrom_sizes", config["genome"]["chrom_sizes"],
-                "--out_dir", out, "--hypothetical", "--in_window", str(g["in_window"]),
+                "--out_dir", out, "--hypothetical",
                 "--n_shuffles", n_shuffles, "--random_state", random_state]
+        if "in_window" in r:
+            argv += ["--in_window", str(r["in_window"])]
+    elif model == "star":
+        s = config["star"]
+        argv = [PY_STAR, str(STEPS / "attr_star.py"),
+                "--peaks", r["peaks"], "--chrom_sizes", config["genome"]["chrom_sizes"],
+                "--out_dir", out,
+                "--msa_path", r.get("msa_path", s["msa_path"]),
+                "--repo", r.get("repo", s["repo"]),
+                "--stride", str(r["stride"]), "--source", r["source"],
+                "--chunk", str(r.get("chunk", s.get("chunk", 100)))]
+        if "in_window" in r:
+            argv += ["--in_window", str(r["in_window"])]
     else:
-        raise ValueError(f"unknown model {r['model']!r}; expected 'cbp' or 'ag'")
+        raise ValueError(f"unknown model {model!r}; expected 'cbp', 'ag' or 'star'")
     if r.get("head"):
         argv += ["--head", str(r["head"])]
     if shard_i is not None:
@@ -135,25 +154,9 @@ SHARDED = sorted(k for k in COMPUTED if config["runs"][k].get("n_shards"))
 SINGLE = sorted(k for k in COMPUTED if not config["runs"][k].get("n_shards"))
 # A cancelled run keeps every rule it always had -- it stays resumable by explicit
 # target -- but drops out of the default target list, so a bare `snakemake` cannot
-# restart work somebody stopped on purpose. See motifline/src/motifline/runs.py and
-# the run's own CANCELLED.md (config: cancelled_note).
+# restart work somebody stopped on purpose (or re-import an archive that is gone).
+# See src/motifline/runs.py and the run's own CANCELLED.md (config: cancelled_note).
 CANCELLED = cancelled_runs(config)
-LEXICON_RUNS = sorted(k for k, v in config["runs"].items() if v.get("lexicon_hits"))
-CROSS_VERSION = sorted(k for k, v in config["runs"].items() if v.get("cross_version_hits"))
-LEXICON_ROUTES = sorted((config.get("lexicons") or {}).get("routes") or {})
-# Cross-model merges: two MoDISco h5 (CBP 2114 + AG 2048) -> one merged lexicon.
-# The finish is motiflex (2026-08-17): every merge gets an annotated tree; the ones
-# that declare `thresholds` also get a compiled lexicon. MotifCompendium stays as
-# the explicit-target comparison arm (rule merge_compendium).
-MERGES = comp.merge_names(config)
-# A merge that declares `thresholds` gets merged and compiled; one that does not stops
-# at the registry and the alignment evidence. (Before 2026-08-25 the hyperparameter was
-# `cut_height`, applied by the `mlex merge` stage motiflex has since removed.)
-MERGE_GATED = sorted(m for m in MERGES if mlx.thresholds(config, m) is not None)
-# A compiled merge is cross-called back over every leaf: the SAME lexicon scanned
-# over each model's own regions (rule merge_cross_call), then reduced to per-motif
-# occupancy / cross-leaf agreement (rule merge_occupancy).
-MERGE_LEAVES = sorted({l for m in MERGE_GATED for l in mlx.leaf_labels(config, m)})
 
 
 def _alt(names):
@@ -174,21 +177,7 @@ rule all:
                run=active_runs(config, sorted(config["runs"]))),
         # every run's patterns named from the one reference lexicon (2026-08-25)
         expand("results/{run}/naming/pattern_names.tsv",
-               run=active_runs(config, sorted(config["runs"]))),
-        # finemo 0.30 vs 0.41 on one and the same regions.npz + modisco.h5
-        expand("results/{run}/hits_v041/hits.tsv",
-               run=active_runs(config, CROSS_VERSION)),
-        # external-lexicon routes
-        expand("results/{run}/hits_lexicon_{route}/hits.tsv",
-               run=active_runs(config, LEXICON_RUNS), route=LEXICON_ROUTES),
-        # cross-model merges: every merge builds its annotated registry; a merge that
-        # declares `thresholds` is also merged and compiled into one shared lexicon,
-        # which is cross-called over every leaf and reduced to occupancy/agreement.
-        expand("results/merges/{merge}/motiflex/evidence/annotation_candidates.parquet",
-               merge=MERGES),
-        expand("results/merges/{merge}/motiflex/merge/merge_groups.tsv", merge=MERGE_GATED),
-        expand("results/merges/{merge}/motiflex/lexicons/core.h5", merge=MERGE_GATED),
-        expand("results/merges/{merge}/motiflex/occupancy/agreement.tsv", merge=MERGE_GATED)
+               run=active_runs(config, sorted(config["runs"])))
 
 rule import_attr:
     """Adopt archived attributions: symlink attr/ohe, normalize peaks -> regions.bed."""
@@ -200,7 +189,7 @@ rule import_attr:
         out = f"results/{wildcards.run}/attr"
         src = r["adopt_from"]
         argv = [ORCH_PY, "-m", "motifline.adopt", "--src_dir", src, "--out_dir", out,
-                "--expected_rows", str(r["rows"]), "--expected_width", str(attr_width(config, r)),
+                "--expected_rows", str(r["rows"]),
                 "--peaks_name", r.get("adopt_peaks", "peaks.bed")]
         run_body(out, argv)
 
@@ -262,17 +251,16 @@ rule discover:
         run_body(out, argv, env=COMPUTE_THREADS)
 
 rule extract_regions:
+    """Package attr/ohe/regions for finemo at the width the array actually is."""
     input: ATTR_FILES
     output: "results/{run}/finemo_regions/regions.npz"
-    params: sig=lambda w: param_sig(width=attr_width(config, rundef(w)))
     run:
-        r = rundef(wildcards)
         attr_dir = f"results/{wildcards.run}/attr"
         out = f"results/{wildcards.run}/finemo_regions"
         argv = [f"{ENV}/bin/finemo", "extract-regions-modisco-fmt",
                 "-s", f"{attr_dir}/ohe.npy", "-a", f"{attr_dir}/attr.npy",
                 "-p", f"{attr_dir}/regions.bed", "-o", f"{out}/regions.npz",
-                "-w", str(attr_width(config, r))]
+                "-w", str(attr_width(wildcards.run))]
         run_body(out, argv)
 
 rule call_hits:
@@ -291,59 +279,9 @@ rule call_hits:
                 "-b", str(f["batch"])]
         run_body(out, argv)
 
-rule call_hits_v041:
-    """The same regions.npz and modisco.h5, called by finemo 0.41 instead of 0.30.
-
-    Nothing downstream consumes this directory -- it exists to be compared.
-    """
-    input: npz=rules.extract_regions.output, lex=rules.discover.output
-    output: "results/{run}/hits_v041/hits.tsv"
-    wildcard_constraints: run=_alt(CROSS_VERSION)
-    resources: gpu=1
-    params: sig=param_sig(finemo=config["finemo"], env=ENV_ALT)
-    run:
-        reg_dir = f"results/{wildcards.run}/finemo_regions"
-        mod_dir = f"results/{wildcards.run}/modisco"
-        out = f"results/{wildcards.run}/hits_v041"
-        f = config["finemo"]
-        argv = [f"{ENV_ALT}/bin/finemo", "call-hits", "-M", f["mode"],
-                "-r", f"{reg_dir}/regions.npz", "-m", f"{mod_dir}/modisco.h5",
-                "-o", out, "-t", str(f["threshold"]), "-l", str(f["alpha"]),
-                "-b", str(f["batch"])]
-        # Note: this env's torch cannot reach a GPU on this node (torch 2.13.0+cu130
-        # vs driver 555.42.06) -- finemo warns and runs on the CPU. Slower, same hits.
-        run_body(out, argv)
-
-rule call_hits_lexicon:
-    """Hit calling against an EXTERNAL lexicon (run_finemo.sh's gw/mmv routes).
-
-    `-m` is the only thing the route changes, exactly as in the shell original;
-    the run's own modisco.h5 is deliberately not an input, so this rule can score
-    a context against a vocabulary that context did not discover. `-b` comes from
-    config.lexicons, not config.finemo: the union lexicon needs the smaller batch.
-    """
-    input: npz="results/{run}/finemo_regions/regions.npz",
-           lex=lambda w: lexicon_path(config, rundef(w), w.route)
-    output: "results/{run}/hits_lexicon_{route}/hits.tsv"
-    wildcard_constraints: run=_alt(LEXICON_RUNS), route=_alt(LEXICON_ROUTES)
-    resources: gpu=1
-    params: sig=lambda w: param_sig(finemo=config["finemo"], batch=lexicon_batch(config))
-    run:
-        r = rundef(wildcards)
-        reg_dir = f"results/{wildcards.run}/finemo_regions"
-        out = f"results/{wildcards.run}/hits_lexicon_{wildcards.route}"
-        lex = input.lex
-        batch = lexicon_batch(config)
-        f = config["finemo"]
-        argv = [f"{ENV}/bin/finemo", "call-hits", "-M", f["mode"],
-                "-r", f"{reg_dir}/regions.npz", "-m", lex,
-                "-o", out, "-t", str(f["threshold"]), "-l", str(f["alpha"]),
-                "-b", str(batch)]
-        run_body(out, argv)
-
 # ---------------------------------------------------------------------------
 # Reference lexicon and pattern naming (2026-08-25). One library, built once, for
-# every run and every merge in this pipeline; rationale in src/motifline/naming.py.
+# every run in this pipeline; rationale in src/motifline/naming.py.
 # The RSAT clustering is the expensive step -- 1h46m on 2614 matrices, measured
 # 2026-08-25 -- and it is the only one; everything downstream is minutes and is cached
 # by snakemake as usual.
@@ -415,8 +353,6 @@ rule name_patterns:
            lex=lambda w: nm.naming_inputs(config)
     output: nm.run_names("{run}")
     params: sig=sig_naming
-    # constrained to declared run names so that a merge's naming directory, which has
-    # the same shape, can only ever be built by rule merge_naming
     wildcard_constraints: run=_alt(sorted(config["runs"]))
     run:
         q, ncor = nm.gate(config)
@@ -428,244 +364,3 @@ rule name_patterns:
                 "--w_th", str(nm.w_th(config)),
                 "--gate_q", str(q), "--gate_ncor", str(ncor), "--out_dir", out]
         run_body(out, argv, env=COMPUTE_THREADS)
-
-rule merge_naming:
-    """Every leaf of a merge named from the same library, and the mlex annotate database.
-
-    One stage over all leaves rather than one per leaf: `mlex annotate` reads a single
-    database file whose node ids span the merge, and running the leaves together is what
-    guarantees they were gated identically.
-    """
-    input: h5=lambda w: comp.dag_inputs(config, w.merge),
-           lex=lambda w: nm.naming_inputs(config)
-    output: nm.merge_names("{merge}"), nm.merge_db_yaml("{merge}")
-    wildcard_constraints: merge=_alt(MERGES)
-    params: sig=sig_merge_naming
-    run:
-        q, ncor = nm.gate(config)
-        merge = wildcards.merge
-        out = f"results/merges/{merge}/naming"
-        argv = [PY, str(STEPS / "name_patterns.py"),
-                "--target", nm.CLTAGGED, *nm.source_argv(config),
-                "--tomtom", nm.params(config)["tomtom"],
-                "--w_th", str(nm.w_th(config)),
-                "--gate_q", str(q), "--gate_ncor", str(ncor),
-                "--out_dir", out, "--db_yaml", nm.merge_db_yaml(merge)]
-        for label, h5 in nm.merge_leaf_h5(config, merge):
-            argv += ["--h5", f"{label}={h5}",
-                     "--node_id", f"{label}={nm.node_prefix(merge, label)}"]
-        run_body(out, argv, env=COMPUTE_THREADS)
-
-rule merge_compendium:
-    """Two or more MoDISco h5 -> ONE MotifCompendium lexicon (comparison arm).
-
-    No longer the end of the line: the DAG finishes merges with motiflex
-    (rule merge_motiflex, 2026-08-17). This rule stays reachable by explicit
-    target -- `snakemake results/merges/<m>/clusters.tsv` -- for the MC arm.
-
-    The leaves of a merge are the SAME regions under different models, each attributed
-    at its own native width (CBP 2114, AG 2048), so the only axis the clustering can
-    collapse is the model axis. Which entries the models actually share is not something
-    MotifCompendium reports -- it clusters on CWM similarity and never reads the `model`
-    column -- so the step recovers it into clusters.tsv.
-
-    Runs in envs/motifcompendium, not the compute env: MotifCompendium pins its own
-    numpy/pandas/igraph/leidenalg stack and nothing else in this DAG needs it.
-    """
-    input: lambda w: comp.dag_inputs(config, w.merge)
-    output: "results/merges/{merge}/clusters.tsv", "results/merges/{merge}/motifs.tsv",
-            "results/merges/{merge}/merged.meme", "results/merges/{merge}/merged.mc"
-    wildcard_constraints: merge=_alt(MERGES)
-    params: sig=sig_compendium
-    run:
-        c = comp.params(config)
-        out = f"results/merges/{wildcards.merge}"
-        argv = [f"{c['env']}/bin/python", str(STEPS / "merge_compendium.py"),
-                "--mc_src", c["src"], "--out_dir", out,
-                "--region_width", str(comp.region_width(config, wildcards.merge)),
-                "--algorithm", c["algorithm"],
-                "--similarity_threshold", str(c["similarity_threshold"]),
-                "--seeds", ",".join(str(s) for s in c["seeds"]),
-                "--max_cpus", str(c.get("max_cpus", 1))]
-        if c.get("use_gpu"):
-            argv += ["--use_gpu"]
-        if c.get("cluster_within_posneg") is False:
-            argv += ["--no_cluster_within_posneg"]
-        if c.get("quality_stats") is False:
-            argv += ["--no_quality_stats"]
-        for label, h5 in comp.leaves(config, wildcards.merge):
-            argv += ["--modisco", f"{label}={h5}"]
-        run_body(out, argv, env=COMPUTE_THREADS)
-
-MOTIFLEX = "results/merges/{merge}/motiflex"
-
-rule merge_ingest:
-    """N MoDISco h5 -> the normalised motif registry (`mlex ingest`).
-
-    Split out of the old single merge rule on 2026-08-25 so that each mlex stage is a
-    real snakemake output. The previous body guarded each stage on `.exists()` against
-    files snakemake did not track, which meant a re-generated db.yaml or project.yaml
-    rebuilt the tree from a stale registry and stale annotations.
-    """
-    input: h5=lambda w: comp.dag_inputs(config, w.merge)
-    output: registry=f"{MOTIFLEX}/registry/registry.json",
-            project=f"{MOTIFLEX}/project.yaml"
-    wildcard_constraints: merge=_alt(MERGES)
-    params: sig=sig_merge_ingest
-    run:
-        import yaml
-        c = mlx.params(config)
-        out = Path(MOTIFLEX.format(merge=wildcards.merge))
-        out.mkdir(parents=True, exist_ok=True)
-        Path(output.project).write_text(
-            yaml.safe_dump(mlx.project(config, wildcards.merge), sort_keys=False, width=200))
-        run_body(out, [c["mlex"], "ingest", output.project,
-                       "--seed", c.get("seed", 42), "--out", out / "registry"])
-
-rule merge_align:
-    """Pairwise alignment evidence over the registry (`mlex align`)."""
-    input: f"{MOTIFLEX}/registry/registry.json"
-    output: f"{MOTIFLEX}/evidence/alignment_edges.parquet"
-    wildcard_constraints: merge=_alt(MERGES)
-    params: sig=sig_merge_align
-    run:
-        c = mlx.params(config)
-        out = Path(MOTIFLEX.format(merge=wildcards.merge))
-        run_body(out, [c["mlex"], "align", out / "registry", "--out", out / "evidence",
-                       "--workers", c.get("workers", 8), "--seed", c.get("seed", 42)])
-
-rule merge_annotate:
-    """Attach the reference lexicon's labels to the registry (`mlex annotate`).
-
-    The database is this pipeline's own naming stage output (rule merge_naming), so
-    both leaves are labelled from one library at one gate.
-    """
-    input: registry=f"{MOTIFLEX}/registry/registry.json",
-           evidence=f"{MOTIFLEX}/evidence/alignment_edges.parquet",
-           db=lambda w: mlx.db_yaml(config, w.merge)
-    output: f"{MOTIFLEX}/evidence/annotation_candidates.parquet"
-    wildcard_constraints: merge=_alt(MERGES)
-    run:
-        c = mlx.params(config)
-        out = Path(MOTIFLEX.format(merge=wildcards.merge))
-        run_body(out, [c["mlex"], "annotate", out / "evidence",
-                       "--registry", out / "registry",
-                       "--tomtom", "--databases", input.db, "--out", out / "evidence"])
-
-rule merge_tree:
-    """The merge itself: RSAT matrix-clustering's criterion over the registry.
-
-    This is the stage motiflex removed on 2026-08-23 (commit 204cb3f) when it
-    repositioned as an auditor of someone else's consolidation -- `mlex compile
-    --decisions` takes a decisions JSON "from any tool", and this is that tool.
-
-    A node merges only when the MEAN cross-pair value of EVERY arm (Ncor, cor, w, all
-    read at one registration) clears its threshold, and a failed node breaks the chain
-    for its ancestors: `TFBMclust/R/check_alignment.R:80-81,106-109` and
-    `align.motifs.R:101`. The thresholds are declared per merge and never defaulted,
-    chosen by reading merge/merge_nodes.tsv -- the same policy the old `cut_height` had.
-    """
-    input: registry=f"{MOTIFLEX}/registry/registry.json",
-           annotation=f"{MOTIFLEX}/evidence/annotation_candidates.parquet"
-    output: decisions=f"{MOTIFLEX}/merge/merge_decisions.json",
-            groups=f"{MOTIFLEX}/merge/merge_groups.tsv",
-            nodes=f"{MOTIFLEX}/merge/merge_nodes.tsv"
-    wildcard_constraints: merge=_alt(MERGE_GATED)
-    params: sig=lambda w: param_sig(thresholds=mlx.thresholds(config, w.merge))
-    run:
-        out = Path(MOTIFLEX.format(merge=wildcards.merge))
-        t = mlx.thresholds(config, wildcards.merge)
-        argv = [PY, str(STEPS / "merge_tree.py"), "--registry", out / "registry",
-                "--out_dir", out / "merge"]
-        for arm, value in t.items():
-            argv += [f"--{arm}", str(value)]
-        run_body(out / "merge", argv, env=COMPUTE_THREADS)
-
-rule merge_compile:
-    """Compile the merged groups into one finemo-callable lexicon (`mlex compile`).
-
-    Group representatives are medoids -- observed patterns, never cross-model averages
-    -- and compile reads the written lexicon back with the real finemo loader
-    (`--verify-roundtrip auto`).
-    """
-    input: registry=f"{MOTIFLEX}/registry/registry.json",
-           decisions=f"{MOTIFLEX}/merge/merge_decisions.json"
-    output: f"{MOTIFLEX}/lexicons/core.h5",
-            f"{MOTIFLEX}/lexicons/manifest.tsv"
-    wildcard_constraints: merge=_alt(MERGE_GATED)
-    params: sig=param_sig(tiers="core", seed=mlx.params(config).get("seed", 42))
-    run:
-        c = mlx.params(config)
-        out = Path(MOTIFLEX.format(merge=wildcards.merge))
-        run_body(out, [c["mlex"], "compile", out / "registry",
-                       "--decisions", input.decisions,
-                       "--tiers", "core", "--verify-roundtrip", "auto",
-                       "--seed", c.get("seed", 42), "--out", out / "lexicons"])
-
-rule merge_cross_regions:
-    """Package one leaf's arrays as finemo regions for the cross-call.
-
-    The same peak rows under each model, each at its own native width; row index
-    is the alignment key downstream (merge_occupancy verifies the beds actually
-    agree before relying on it).
-    """
-    input: lambda w: mlx.cross_call_inputs(config, w.merge, w.leaf)
-    output: "results/merges/{merge}/motiflex/cross_call/{leaf}/regions.npz"
-    wildcard_constraints: merge=_alt(MERGE_GATED), leaf=_alt(MERGE_LEAVES)
-    params: sig=sig_cross_regions
-    run:
-        l = mlx.cross_call_leaf(config, wildcards.merge, wildcards.leaf)
-        mlx.check_leaf_arrays(wildcards.merge, wildcards.leaf, l)
-        out = f"results/merges/{wildcards.merge}/motiflex/cross_call/{wildcards.leaf}"
-        argv = [f"{ENV}/bin/finemo", "extract-regions-modisco-fmt",
-                "-s", l["ohe"], "-a", l["attr"], "-p", l["bed"],
-                "-o", f"{out}/regions.npz", "-w", str(l["width"])]
-        run_body(out, argv)
-
-rule merge_cross_call:
-    """Every leaf scanned with the ONE compiled lexicon (finemo call-hits).
-
-    This is what compiling is for: both models are read through an identical
-    vocabulary, so a difference between the hit tables is a model difference,
-    not a lexicon difference. `-b` comes from config.lexicons for the same
-    reason as rule call_hits_lexicon: batch size must not vary between
-    external-lexicon calls.
-    """
-    input: npz="results/merges/{merge}/motiflex/cross_call/{leaf}/regions.npz",
-           lex="results/merges/{merge}/motiflex/lexicons/core.h5"
-    output: "results/merges/{merge}/motiflex/cross_call/{leaf}/hits.tsv"
-    wildcard_constraints: merge=_alt(MERGE_GATED), leaf=_alt(MERGE_LEAVES)
-    resources: gpu=1
-    params: sig=param_sig(finemo=config["finemo"], batch=lexicon_batch(config))
-    run:
-        out = f"results/merges/{wildcards.merge}/motiflex/cross_call/{wildcards.leaf}"
-        f = config["finemo"]
-        argv = [f"{ENV}/bin/finemo", "call-hits", "-M", f["mode"],
-                "-r", input.npz, "-m", input.lex, "-o", out,
-                "-t", str(f["threshold"]), "-l", str(f["alpha"]),
-                "-b", str(lexicon_batch(config))]
-        run_body(out, argv)
-
-rule merge_occupancy:
-    """Cross-call hit tables -> per-motif occupancy and cross-leaf agreement.
-
-    Counting caliber lives in steps/merge_occupancy.py's docstring; the step
-    refuses if the leaves' beds differ anywhere, because rows align by index.
-    """
-    input:
-        hits=lambda w: [f"results/merges/{w.merge}/motiflex/cross_call/{l}/hits.tsv"
-                        for l in mlx.leaf_labels(config, w.merge)],
-        manifest="results/merges/{merge}/motiflex/lexicons/manifest.tsv"
-    output: "results/merges/{merge}/motiflex/occupancy/occupancy.tsv",
-            "results/merges/{merge}/motiflex/occupancy/agreement.tsv"
-    wildcard_constraints: merge=_alt(MERGE_GATED)
-    run:
-        out = f"results/merges/{wildcards.merge}/motiflex/occupancy"
-        argv = [PY, str(STEPS / "merge_occupancy.py"),
-                "--manifest", input.manifest, "--out_dir", out]
-        for label in mlx.leaf_labels(config, wildcards.merge):
-            l = mlx.cross_call_leaf(config, wildcards.merge, label)
-            argv += ["--hits",
-                     f"{label}=results/merges/{wildcards.merge}/motiflex/cross_call/{label}/hits.tsv",
-                     "--bed", f"{label}={l['bed']}"]
-        run_body(out, argv)

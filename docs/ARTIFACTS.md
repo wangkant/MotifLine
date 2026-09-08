@@ -23,11 +23,11 @@ longer writes or reads them.
 | `ohe.npy` | `(N, 4, W)` `int8` — the one-hot input the scores belong to |
 | `regions.bed` | `N` lines, 11 tab-separated columns |
 
-`W` is the run's own attribution width, `motifline.geometry.attr_width`. Canonical
-since 2026-08-16: **CBP 2114, AG 2048** — each model attributes its native window
-and stores all of it, so the two differ by 66bp and neither is cropped to meet the
-other. Runs that declare the older AG geometry (16384bp window, central crop to
-2114) keep it, because that is what their archived arrays are.
+`W` is whatever width the step stored, and every downstream stage reads it off
+`attr.npy` (the Snakefile's `attr_width`; `geometry.py` was removed 2026-09-07). The
+steps' own defaults: **CBP 2114, AG 2048, GPN-Star 1536** — each model attributes its
+native window and stores all of it. Runs that declare the older AG geometry (16384bp
+window, central crop to 2114) keep it, because that is what their archived arrays are.
 Sharded runs write `attr_<i>.npy` / `ohe_<i>.npy` /
 `regions_<i>.bed` — the index is in the filename so `merge_shards` can check
 that shard *i* really is the *i*-th directory it was given.
@@ -39,11 +39,13 @@ step passes through the archive's 11-column `load_region_df` form; the AG step
 expands its 4-column `(chr,start,end,summit)` frame to the same 11 columns
 (`attr_ag.narrowpeak_text`, byte-identical to `adopt.normalize_peaks`).
 
-**`N` is not necessarily `len(peaks.bed)`.** Both steps drop regions whose
-window runs off the chromosome (`summit ± in_window/2`), and the two models then
+**`N` is not necessarily `len(peaks.bed)`.** Every step drops regions whose
+window runs off the chromosome (`summit ± in_window/2`), and the models then
 handle ambiguous bases differently: CBP additionally drops any row containing an
-`0.25` (N) column or an all-zero column (`attr_cbp.py:129-134`), while AG fills
-`N → A` and keeps the row, so that the AG region set stays equal to CBP's. This is
+`0.25` (N) column or an all-zero column (`attr_cbp.py:129-134`), AG fills
+`N → A` and keeps the row, so that the AG region set stays equal to CBP's, and
+GPN-Star drops the row (plus rows on chromosomes the alignment store lacks) and
+lists them in `n_dropped.tsv` (`chr, start, summit, reason`). This is
 why `regions.bed` — not `peaks.bed` — is the row key for everything downstream.
 
 That fill used to be free: at the 16384 → 2114 geometry the N's were in flanks the
@@ -72,15 +74,26 @@ the resume test was previously the chunk index alone, so changing a run's `track
 `n_shuffles` and re-running produced an `attr.npy` concatenated from two parameter
 generations, silently.
 
+### GPN-Star (`attr_star.py`) — `attr/` and `_chunks_<i>/`
+
+`attr.npy` holds `softmax(logits) − 1/4` at every position, both strands averaged
+(the recipe of songlab's `modisco_run.py`); `ohe.npy` is the human column of the
+alignment. The window is masked in `stride` groups per strand (positions
+`p % stride == r` together), the run's declared `stride`/`source` are in
+`_chunks_<i>/chunk_identity.json` with the rest of the chunk identity, and the
+per-chunk files are `attr_<c>.npy` / `ohe_<c>.npy` / `regions_<c>.bed` /
+`dropped_<c>.tsv`, resumed by existence exactly as AG's. `regions.bed` is the
+concatenation of the per-chunk beds, so it lists kept rows only.
+
 ## `import_attr` → `attr/`
 
 Same three files, one difference: `attr.npy` and `ohe.npy` are **absolute
 symlinks** into the archived `interpret_*_par_hyp/` tree (the old tree is
 read-only and these cost GPU-days), and only `regions.bed` is newly written.
 
-`adopt.adopt_attr` checks the archive's rows and width against the run's
-`rows:`/`crop:` before it links anything, and raises `ValueError` on a drift, so
-a failed adoption leaves an empty directory rather than a half-linked one.
+`adopt.adopt_attr` checks the archive's rows against the run's `rows:` (and that
+attr and ohe agree on width) before it links anything, and raises `ValueError` on a
+drift, so a failed adoption leaves an empty directory rather than a half-linked one.
 
 ## `discover` → `modisco/`
 
@@ -89,8 +102,8 @@ a failed adoption leaves an empty directory rather than a half-linked one.
 | `modisco.h5` | MoDISco-lite report: `pos_patterns/` and `neg_patterns/`, each pattern with `contrib_scores` (the CWM, `(L,4)`), `sequence`, `hypothetical_contribs`, `seqlets/` |
 
 Patterns are named **by rank** (`pattern_0`, `pattern_1`, …). Two lexicons of
-different sizes therefore reuse the same names for different motifs — which is
-why every level-3 comparison against an archive joins on CWM identity, not name.
+different sizes therefore reuse the same names for different motifs — compare
+patterns across runs on CWM identity, not name.
 
 ## `extract_regions` → `finemo_regions/`
 
@@ -102,7 +115,7 @@ why every level-3 comparison against an archive joins on CWM identity, not name.
 sees a quantized copy of the attributions, and differences at ~1e-4 between two
 hit tables are at that floor, not above it.
 
-## `call_hits` → `hits/` (also `hits_lexicon_<route>/`, `hits_v041/`)
+## `call_hits` → `hits/`
 
 | file | contents |
 |---|---|
@@ -119,12 +132,9 @@ extent by trimming its CWM at `-t`, so two runs whose CWMs differ slightly emit
 the same hits at coordinates shifted by a base or two — compare hit sets with a
 ±2bp tolerance in mind, not by exact coordinates.
 
-`hits_v041/` and `hits_lexicon_<route>/` are **leaves**: nothing in the DAG
-consumes them.
-
 ## `lexicon_*` → `results/lexicon/`
 
-The reference lexicon, built once and shared by every naming stage (2026-08-25).
+The reference lexicon, built once and shared by every run's naming stage (2026-08-25).
 Verified against the artifacts it replaces: `lexicon_sources_union.meme`,
 `lexicon_rsat.meme` and `union_cltagged.meme` are byte-identical to the
 hand-built originals, `ncor.npy` agrees to 1.1e-15.
@@ -143,7 +153,7 @@ hand-built originals, `ncor.npy` agrees to 1.1e-15.
 without it **silently**, so a union missing it clusters one library and looks
 like it worked.
 
-## `name_patterns` / `merge_naming` → `<run>/naming/`, `merges/<name>/naming/`
+## `name_patterns` → `<run>/naming/`
 
 | file | contents |
 |---|---|
@@ -151,7 +161,6 @@ like it worked.
 | `tomtom_<label>/` | TomTom's own output (`-mi 1` deliberately absent — against a batch query it would score only the first pattern) |
 | `pattern_names.tsv` | one row per pattern: `label, key, group, pattern, n_seqlets, trim_*, ic_core_len`, `match0..2`/`cluster0..2`/`qval0..2`/`overlap0..2`, `assigned_cluster`, `cluster_stable`, `best_ncor`, `best_ncor_match`, `annotated`, plus the provenance the names depend on — `target`, `target_sha256`, `gate_q`, `gate_ncor`, `w_th` |
 | `tomtom_<label>/target.sha256` | digest of the library that produced that TomTom run. The run is reused only when the digest matches AND the TSV ends with TomTom's closing comment block; a rebuilt lexicon or a truncated file forces a re-run instead of being silently accepted |
-| `db.yaml` | (merge stages only) the gated matches as an `mlex annotate` database |
 
 `assigned_cluster` is read off the winning target's name — the cluster id is
 already there, which is what the tagged union is for. `cluster_stable` says the
@@ -162,92 +171,11 @@ straddles clusters and the assignment deserves a look.
 `best_ncor >= gate.ncor`. `best_ncor` is a second, independent measurement: Ncor
 of the pattern's IC>0.3 core against the untagged matrices, i.e. the same
 similarity the clustering was built on, on a different trim than the TomTom
-query. Rows failing either arm are kept with `annotated=False`, are not renamed,
-and do not enter `db.yaml`. A pattern whose IC core is shorter than 5 columns has
+query. Rows failing either arm are kept with `annotated=False` and are not renamed. A pattern whose IC core is shorter than 5 columns has
 no comparable Ncor (`best_ncor` empty) and fails the gate by construction.
 
 Families are **not** here. Grouping cluster ids into site types is a human
 judgement made once per project; the chain stops at the cluster.
-
-## `merge_ingest` / `merge_align` / `merge_annotate` / `merge_tree` / `merge_compile` → `merges/<name>/motiflex/`
-
-Four motiflex stages plus the merge itself, which is this pipeline's since motiflex
-removed its `merge` subcommand on 2026-08-23 (commit `204cb3f`). Each stage is its own
-rule with its own declared output — before 2026-08-25 they were one rule that skipped
-stages on `.exists()` against files snakemake did not track, so a regenerated db.yaml
-rebuilt the tree from a stale registry and stale annotations.
-
-| file | contents |
-|---|---|
-| `project.yaml` | the ingest declaration this rule wrote from config — every semantic field (model, readout, union_id, widths, celltypes) explicit |
-| `registry/registry.json` + `registry/arrays.h5` | normalised motif registry: CWM, hypothetical CWM, PPM, seqlet count, trimmed core. Node ids are `<analysis id>::<group>_patterns.<pattern_N>` |
-| `evidence/alignment_edges.parquet` | per registered pair: similarity at the winning registration, per-pair shuffle-null empirical p |
-| `evidence/alignment_run_summary.json` | node/pair counts and exclusion reasons (`no_offset_meets_overlap_floor` marks short-core patterns that can never merge) |
-| `evidence/annotation_candidates.parquet` | the labels `merge_naming`'s db.yaml proposed, joined onto the registry |
-| `merge/merge_nodes.tsv` | every internal node: `height`, `n_left`/`n_right`, `mean_Ncor`/`mean_cor`/`mean_w`, `failed_arms`, `inherited_break`, `merged`. **This is what a threshold is chosen by reading.** |
-| `merge/merge_groups.tsv` | per group: `size`, `representative`, `representative_tied`, `membership` (`shared` / `<label>_only`), `min_ncor`, `n_seqlets`, `members` |
-| `merge/merge_decisions.json` | `{"merges": [{"members": [...], "representative": ...}]}` — what `mlex compile` reads. Singletons are absent: they survive as themselves |
-| `lexicons/core.h5` + `manifest.tsv` | the compiled lexicon, content-addressed, read back with the real finemo loader |
-
-The criterion is RSAT `matrix-clustering`'s, not a dendrogram height: a node merges
-only when the **mean cross-pair** value of **every** arm (`Ncor`, `cor`, `w`, all read
-at one registration) clears its threshold, and a node that fails breaks the chain for
-its ancestors rather than being re-tested (`TFBMclust/R/check_alignment.R:80-81,
-106-109`; `align.motifs.R:101`). A group is therefore a maximal subtree in which every
-internal node passed every arm.
-
-`representative_tied` is not decoration. The representative is the medoid by mean
-within-group distance, but for a two-member group both members have the same mean
-distance by construction, so the medoid carries no information and the tie-break
-(seqlet count, then node id) decides. A tied representative must not be read as "the
-most typical member".
-
-The thresholds are a hyperparameter: declared per merge in config after reading
-`merge_nodes.tsv`, never defaulted. Without them the line stops at the annotated
-registry. A merge that still declares the old `cut_height` is refused — it was the
-parameter of a stage that no longer exists and does not map onto this criterion.
-
-## `merge_cross_regions` / `merge_cross_call` / `merge_occupancy` → `merges/<name>/motiflex/{cross_call,occupancy}/`
-
-The cross-call (2026-08-20): each leaf's own regions scanned with the ONE
-compiled lexicon, then reduced to occupancy and cross-leaf agreement. Alignment
-across leaves is by bed row index; `merge_occupancy` refuses if the beds differ.
-
-| file | contents |
-|---|---|
-| `cross_call/<leaf>/regions.npz` | the leaf's arrays packaged for finemo at the leaf's native width |
-| `cross_call/<leaf>/hits.tsv` | finemo `call-hits` of the compiled lexicon over that leaf (`-b` = `lexicons.batch`) |
-| `occupancy/peak_by_motif_<leaf>.tsv.gz` | hit **counts** per (peak row, lexicon entry); columns named by `variant_id` |
-| `occupancy/occupancy.tsv` | per (motif, leaf): `n_hits`, `n_peaks` (peaks with >=1 hit), `frac_peaks` |
-| `occupancy/agreement.tsv` | per (motif, leaf pair): `n_both`/`n_only_a`/`n_only_b`/`n_neither` on the binarised matrices, `jaccard` (empty when no peak carries the motif in either leaf) |
-
-The motif universe is the compiled lexicon's manifest, not the union of motifs
-seen in hits — an entry one model never calls keeps its zero row.
-
-## `merge_compendium` → `merges/<name>/`
-
-Comparison arm (explicit target only; the DAG finish is motiflex above). Two or
-more MoDISco h5 clustered into one lexicon by MotifCompendium 1.0.18.
-
-| file | contents |
-|---|---|
-| `clusters.tsv` | one row per cluster: `name` (`cluster#<i>`), `source_cluster`, `num_motifs`, `num_seqlets`, `leaves` (per-leaf pattern counts), `posneg`, `avg_dist_from_summit`, MotifCompendium's quality columns (`best_match_similarity`, `lowest_constituent_cluster_similarity`, `lowest_internal_similarity`, `highest_external_similarity`), `n_<label>` per leaf, `membership` |
-| `motifs.tsv` | one row per **input** pattern: `name` (`<label>-<pos\|neg>.pattern_<i>`), `num_seqlets`, `model` (= leaf label), `posneg`, `avg_dist_from_summit`, `cluster`, `pattern` |
-| `merged.meme` | the merged lexicon — one cluster-average PPM per cluster, zero-flanks trimmed |
-| `compendium.mc` | every input pattern with its cluster assignment |
-| `merged.mc` | the cluster averages (`merged.meme` was written from this) |
-
-`membership` is `shared` when every leaf contributed a pattern to the cluster,
-`<label>_only` when one did, and the joined labels when some did — it is computed
-here, not by MotifCompendium, which clusters on CWM similarity and never reads the
-`model` column.
-
-Positive and negative patterns cannot land in the same cluster
-(`compendium.cluster_within_posneg`): similarity is computed on IC-scaled PPMs and
-is sign-blind, so without the constraint an activating and a repressive pattern of
-the same shape would merge.
-
-Nothing downstream consumes this directory — the merged lexicon is the deliverable.
 
 ## `merge_shards` → `attr/`
 
@@ -259,6 +187,7 @@ that each shard's attr/ohe/regions agree on row count, and the rule passes
 `--expected_rows` so a merge over an unfinished shard is a hard error rather
 than a short matrix that still looks valid.
 
-(The `equivalence_*` comparison rules and their reports were removed on
-2026-08-15 together with the audit layer; pre-existing `equivalence/` result
-directories, if any survive elsewhere, are historical.)
+(The `equivalence_*` comparison rules were removed on 2026-08-15 with the audit
+layer; the cross-model merge, the external-lexicon routes and the finemo 0.41 arm on
+2026-09-07. `results/merges/`, `hits_lexicon_*/` and `hits_v041/` directories, where
+they survive, are historical.)

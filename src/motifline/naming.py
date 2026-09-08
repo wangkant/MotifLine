@@ -1,11 +1,9 @@
 """Where pattern names come from: the reference lexicon and the annotation gate.
 
-Until 2026-08-24 this pipeline named nothing. Patterns travelled as ``pos_patterns.
-pattern_3`` and whatever label an upstream report had guessed, and ``mlex annotate``
-was wired to an optional ``db_yaml`` that no merge declared -- so the annotate step was
-skipped and the merge tree carried no proposed labels at all.
+Until 2026-08-24 this pipeline named nothing: patterns travelled as ``pos_patterns.
+pattern_3`` and whatever label an upstream report had guessed.
 
-The naming chain adopted here is one source for the whole project:
+The naming chain adopted here is one source for every run of the pipeline:
 
     sources (HOCOMOCO H14CORE + JASPAR CORE vert NR)
         -> union MEME, every matrix kept          (steps/lexicon_union.py)
@@ -31,8 +29,6 @@ paired -- are a human judgement made once per project and are deliberately not d
 here. This module stops at the cluster.
 """
 from __future__ import annotations
-
-from motifline import compendium as comp
 
 #: Everything the lexicon build and the naming stage write.
 LEXICON_DIR = "results/lexicon"
@@ -155,27 +151,3 @@ def naming_inputs(cfg: dict) -> list[str]:
 
 def run_names(run: str) -> str:
     return f"results/{run}/naming/pattern_names.tsv"
-
-
-def merge_names(name: str) -> str:
-    return f"results/merges/{name}/naming/pattern_names.tsv"
-
-
-def merge_db_yaml(name: str) -> str:
-    """The ``mlex annotate`` database this merge's naming stage writes."""
-    return f"results/merges/{name}/naming/db.yaml"
-
-
-def merge_leaf_h5(cfg: dict, name: str) -> list[tuple[str, str]]:
-    """``(label, modisco.h5)`` for a merge's leaves, resolved the same way ingest does."""
-    return list(comp.leaves(cfg, name))
-
-
-def node_prefix(name: str, label: str) -> str:
-    """The mlex analysis id a leaf's patterns are addressed by inside a merge.
-
-    Must stay equal to ``mlex.project``'s ``id`` field: ``annotate`` matches a database
-    entry to a candidate on ``<analysis id>::<pattern key>`` and silently proposes
-    nothing for an id that does not exist.
-    """
-    return f"{label}_{name}"

@@ -76,7 +76,7 @@ def normalize_peaks(src, dst) -> dict:
     return write_peaks(normalize_peaks_text(src), dst)
 
 
-def adopt_attr(src_dir, out_dir, expected_rows: int, expected_width: int,
+def adopt_attr(src_dir, out_dir, expected_rows: int, expected_width: int | None = None,
                peaks_name: str = "peaks.bed", attr_name: str = "attr.npy",
                ohe_name: str = "ohe.npy") -> dict:
     """Link an archived attr/ohe pair into ``out_dir`` and normalize its peaks bed."""
@@ -93,7 +93,9 @@ def adopt_attr(src_dir, out_dir, expected_rows: int, expected_width: int,
         raise ValueError(f"row drift: attr={sa[0]} ohe={so[0]} peaks={n_bed} in {src}")
     if sa[0] != expected_rows:
         raise ValueError(f"expected {expected_rows} rows, archive has {sa[0]} in {src}")
-    if not (sa[-1] == so[-1] == expected_width):
+    if sa[-1] != so[-1]:
+        raise ValueError(f"width drift: attr={sa[-1]} ohe={so[-1]} in {src}")
+    if expected_width is not None and sa[-1] != expected_width:
         raise ValueError(f"width drift: attr={sa[-1]} ohe={so[-1]} expected={expected_width}")
 
     out.mkdir(parents=True, exist_ok=True)
@@ -118,7 +120,8 @@ def main():
     ap.add_argument("--src_dir", required=True, help="archived interpret_*_par_hyp directory")
     ap.add_argument("--out_dir", required=True)
     ap.add_argument("--expected_rows", type=int, required=True)
-    ap.add_argument("--expected_width", type=int, required=True)
+    ap.add_argument("--expected_width", type=int, default=None,
+                    help="optional; the array's own width is the width (geometry.py removed 2026-09-07)")
     ap.add_argument("--peaks_name", default="peaks.bed")
     a = ap.parse_args()
     info = adopt_attr(a.src_dir, a.out_dir, a.expected_rows, a.expected_width, a.peaks_name)

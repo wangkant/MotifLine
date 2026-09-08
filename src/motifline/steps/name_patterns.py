@@ -26,7 +26,7 @@ Three details that are load-bearing:
    happens to contain a TF half-site is the standard case.
 
 An ungated pattern is reported with its match and marked ``annotated=False``; it is not
-renamed and it is not proposed to ``mlex annotate``. Nothing here assigns a *family*:
+renamed. Nothing here assigns a *family*:
 grouping cluster ids into site types is a human judgement made once per project, not a
 derivable function of the matrices.
 """
@@ -113,24 +113,6 @@ def gated(qval, best_ncor, gate_q, gate_ncor):
                 and best_ncor == best_ncor and best_ncor >= gate_ncor)
 
 
-def db_matches(df, node_ids):
-    """The gated rows as ``mlex annotate`` database entries.
-
-    The proposed label is the RSAT cluster, never the individual library entry: the
-    matched entry is recorded alongside as the evidence for it.
-    """
-    out = []
-    for r in df[df.annotated].itertuples():
-        m = dict(node_id=f"{node_ids.get(r.label, r.label)}::{r.key}",
-                 proposed_family_id=r.assigned_cluster,
-                 matched_motif_id=r.match0,
-                 q_value=float(r.qval0))
-        if r.overlap0 >= 0:
-            m["aligned_span"] = int(r.overlap0)
-        out.append(m)
-    return out
-
-
 def _top(tsv, n=3):
     """``{query: [[target, q, overlap], ...]}``, best q first."""
     t = pd.read_csv(tsv, sep="\t", comment="#").dropna(subset=["Query_ID"])
@@ -142,8 +124,6 @@ def _top(tsv, n=3):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--h5", action="append", required=True, help="label=modisco.h5, repeatable")
-    p.add_argument("--node_id", action="append", default=[],
-                   help="label=<mlex analysis id>; db.yaml node ids are <id>::<pattern key>")
     p.add_argument("--target", required=True, help="union_cltagged.meme")
     p.add_argument("--source", action="append", required=True,
                    help="tag=path of the untagged union sources, for the Ncor arm")
@@ -153,13 +133,11 @@ def main():
     p.add_argument("--gate_q", type=float, required=True)
     p.add_argument("--gate_ncor", type=float, required=True)
     p.add_argument("--out_dir", required=True)
-    p.add_argument("--db_yaml", help="also emit an mlex annotate database for the gated matches")
     a = p.parse_args()
 
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     leaves = [s.split("=", 1) for s in a.h5]
-    node_ids = dict(s.split("=", 1) for s in a.node_id)
 
     # ---- 1. query MEME per leaf, on modiscolite's trim ----
     pats = {}
@@ -264,21 +242,6 @@ def main():
         print(f"\n===== {label} =====")
         print(s[["key", "n_seqlets", "assigned_cluster", "qval0", "best_ncor",
                  "cluster_stable", "annotated"]].to_string(index=False))
-
-    # ---- 5. optional: the mlex annotate database, gated matches only ----
-    if a.db_yaml:
-        import yaml
-        # Fail loudly: motiflex copies this string into every annotation row's
-        # source_version, and "MEME unknown" is a provenance hole, not a value.
-        v = subprocess.run([a.tomtom, "-version"], capture_output=True, text=True,
-                           check=True).stdout.strip()
-        matches = db_matches(df, node_ids)
-        Path(a.db_yaml).parent.mkdir(parents=True, exist_ok=True)
-        Path(a.db_yaml).write_text(yaml.safe_dump(
-            {"tomtom": {"version": f"MEME {v} / {Path(a.target).name} sha256:{target_key[:12]}",
-                        "matches": matches},
-             "family_level_output": True}, sort_keys=False, width=200))
-        print(f"\n{a.db_yaml}: {len(matches)} gated matches proposed to mlex annotate")
 
 
 if __name__ == "__main__":

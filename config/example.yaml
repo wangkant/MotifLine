@@ -1,169 +1,85 @@
 kant: /path/to/kant
 envs:
-  compute: /path/to/kant/envs/chrombpnet_local
-  # Second finemo (0.41), for the 0.30-vs-0.41 comparison ONLY (rule
-  # call_hits_v041). Nothing else in the DAG uses it: every other hit-calling
-  # stage runs the compute env's finemo, the one that extracted the regions.
-  finemo_alt: /path/to/kant/envs/mmv_verify
+  compute: /path/to/kant/envs/chrombpnet_local   # torch, chrombpnet, tangermeme, modisco-lite, finemo 0.30
+  star: /path/to/kant/envs/gpn_star              # GPN-Star only: torch 2.6.0+cu124 + gpn 0.9.0 (attr_star.py)
 chrombpnet_src: /path/to/kant/models/chrombpnet-pytorch
 ag_src: /path/to/kant/models/alphagenome-pytorch-deeplift/src
 genome:
   fasta: /path/to/kant/data/genome/hg38.fa
   chrom_sizes: /path/to/kant/data/genome/hg38.chrom.sizes
 
-# Attribution references. tangermeme seeds each reference by random_state + shuffle
-# index (deep_lift_shap.py:428-433), deliberately so batching cannot change the output;
-# what CAN change it is the reference COUNT and the seed. Both are stated here rather
-# than inherited from chrombpnet's/tangermeme's signature, which a version bump could
-# move under us. A run may override either.
+# Attribution references (cbp / ag). tangermeme seeds each reference by random_state +
+# shuffle index (deep_lift_shap.py:428-433), deliberately so batching cannot change the
+# output; what CAN change it is the reference COUNT and the seed. Both are stated here
+# rather than inherited from chrombpnet's/tangermeme's signature, which a version bump
+# could move under us. A run may override either.
 attribution:
   n_shuffles: 20         # == the tools' current default; verified, not assumed
   random_state: 42
 
-# Canonical attribution geometry: each model attributes its OWN native window and
-# stores all of it. AG's 2048 is its input floor (16 x 128bp trunk bins), CBP's 2114 is
-# its training input; neither is cropped to meet the other. A run may override these --
-# the adopted runs below do, because their archives were computed at AG 16384 -> crop
-# 2114 -- but an unspecified run gets these. Rationale: src/motifline/geometry.py.
-# REQUIRED: geometry() reads this block before it looks at a run's own in_window, so a
-# config without it raises on every geometry-dependent rule.
-geometry:
-  cbp:
-    in_window: 2114
-  ag:
-    in_window: 2048
-    crop: 2048         # == in_window: nothing to crop at the native width
+# Attribution windows are NOT configured here any more (geometry.py removed 2026-09-07):
+# a run that declares in_window/crop passes them to its step, an unspecified run gets
+# the step's own default (cbp 2114; ag 2048 in / 2048 stored; star 1536), and every
+# downstream stage reads the width off attr.npy itself.
+
+# GPN-Star (steps/attr_star.py): model from HF, alignment from the zarr stores that
+# new_experiment/star/scripts/02_download_msa.sh downloaded. A run may override either.
+star:
+  msa_path: /path/to/kant/data/gpn_star_msa/multiz100way
+  repo: songlab/gpn-star-hg38-v100-200m
+  chunk: 100
+
 runs:
-  k562_cbp_slice500:
-    model: cbp
-    wo_bias: /path/to/kant/new_experiment/region_v3/k562/model/chrombpnet_wo_bias.pt
-    peaks: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
-    head: 500
-    in_window: 2114
-    old_attr: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/attr.npy
-    old_regions: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
-  k562_ag_slice200:
-    model: ag
-    weights: /path/to/kant/data/alphagenome/model_fold_0.safetensors
-    ag_src: /path/to/kant/models/alphagenome-pytorch-deeplift/src
-    peaks: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
-    track: 60
-    head: 200
-    in_window: 16384
-    crop: 2114
-    n_shuffles: 20
-    chunk: 100
-    old_attr: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/attr.npy
-    old_regions: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/peaks.bed
-  # ---- full-scale canonical production: attributions recomputed in shards ----
-  # These are not bit-for-bit reproductions of the archive: they run the tools'
-  # official parameters (README.md's parameter paragraph), so the archive comparisons below
-  # are consistency reports, not gates.
-  k562_cbp_full:
-    model: cbp
-    wo_bias: /path/to/kant/new_experiment/region_v3/k562/model/chrombpnet_wo_bias.pt
-    peaks: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
-    head: null
-    n_shards: 4
-    rows: 33917
-    in_window: 2114
-    cross_version_hits: true      # also call hits with the alternate finemo (0.41)
-    old_attr: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/attr.npy
-    old_regions: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
-    old_modisco: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
-    old_hits: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/finemo_hits/hits.tsv
-  # CANCELLED 2026-08-15 by the user: the AG code path is already proven by the
-  # slice-200 level-1 report (r >= 0.9999999994) and AG's downstream by
-  # k562_ag_adopted, so a second full-scale AG attribution buys no verification.
-  # The definition stays so the five started shards remain resumable by explicit
-  # target; `cancelled: true` only removes it from `rule all`. Reason, per-shard
-  # checkpoint state and the exact resume commands:
-  #   results/k562_ag_full/CANCELLED.md
-  # The canonical AG side of this project is `k562_ag_adopted`.
-  k562_ag_full:
-    cancelled: true
-    cancelled_note: results/k562_ag_full/CANCELLED.md
-    model: ag
-    weights: /path/to/kant/data/alphagenome/model_fold_0.safetensors
-    ag_src: /path/to/kant/models/alphagenome-pytorch-deeplift/src
-    peaks: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/peaks.bed
-    track: 60
-    head: null
-    n_shards: 6          # ~5653 peaks/shard at ~7.2 s/peak = ~11 h/shard on one card
-    rows: 33917
-    in_window: 16384
-    crop: 2114
-    n_shuffles: 20
-    chunk: 100
-    old_attr: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/attr.npy
-    old_regions: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/peaks.bed
-    old_modisco: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/modisco.h5
-    old_hits: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/finemo_hits/hits.tsv
   # ---- adopted runs: archived attributions linked in, downstream recomputed ----
+  # FROZEN 2026-09-07. The arrays these three adopted were deleted when the region_v3
+  # (k562, gm12878) and region_v4/02_motif_grammar results were cleared; their attr/ohe
+  # symlinks dangle, while modisco.h5 / regions.npz / hits.tsv / naming stay under
+  # results/<run>/ as finished artifacts. `cancelled: true` keeps a bare `snakemake` from trying to
+  # re-import a directory that no longer exists; the entries stay so the artifacts keep
+  # a run definition to be read against.
   k562_cbp_adopted:
+    cancelled: true
+    cancelled_note: results/k562_cbp_adopted/CANCELLED.md
     model: cbp
     adopt_from: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp
     adopt_peaks: peaks.bed          # already the 11-col load_region_df form
     rows: 33917
     in_window: 2114
-    old_modisco: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
-    old_hits: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/finemo_hits/hits.tsv
-  k562_ag_adopted:
+  # AG at its NATIVE 2048bp window (16 x 128bp trunk bins). Same 33,917 regions, same
+  # peaks.bed rows as the CBP side, so the two runs pair row-for-row.
+  k562_ag2048_adopted:
+    cancelled: true
+    cancelled_note: results/k562_ag2048_adopted/CANCELLED.md
     model: ag
-    adopt_from: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp
+    adopt_from: /path/to/kant/new_experiment/region_v4/02_motif_grammar/interpret_ag2048_par_hyp/k562
     adopt_peaks: peaks.bed          # 4-col chr/start/end/summit -> expanded to narrowPeak form
     rows: 33917
-    in_window: 16384
-    crop: 2114
-    old_modisco: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/modisco.h5
-    old_hits: /path/to/kant/new_experiment/region_v3/k562/interpret_ag_par_hyp/finemo_hits/hits.tsv
+    in_window: 2048
+    crop: 2048
   gm12878_cbp_adopted:
+    cancelled: true
+    cancelled_note: results/gm12878_cbp_adopted/CANCELLED.md
     model: cbp
     adopt_from: /path/to/kant/new_experiment/region_v3/gm12878/interpret_cbp_par_hyp
     adopt_peaks: peaks.bed
     rows: 21084
     in_window: 2114
-    old_modisco: /path/to/kant/new_experiment/region_v3/gm12878/interpret_cbp_par_hyp/modisco.h5
-    old_hits: /path/to/kant/new_experiment/region_v3/gm12878/interpret_cbp_par_hyp/finemo_hits/hits.tsv
-  # One Leiden-cluster context, adopted for the external-lexicon routes. cl1's
-  # attr.npy/ohe.npy are a byte-identical ROW SUBSET of the same archived K562 CBP
-  # attribution that k562_cbp_adopted links (prep_allclusters.py:56-80 slices
-  # interpret_cbp_par_hyp on an explicit (chrom, summit_abs) join); verified in
-  # tests/test_lexicon_context_is_subset.py. That is what makes its archived hits a legitimate comparison
-  # object for this pipeline's output.
-  k562_cbp_cl1_adopted:
-    model: cbp
-    lexicon_model: cbp            # key into lexicons.routes, i.e. the shell's $m
-    adopt_from: /path/to/kant/new_experiment/region_v4/04_cbp_only_islands/allclusters/cl1
-    adopt_peaks: peaks_np.bed
-    rows: 2399
-    in_window: 2114
-    lexicon_hits:                 # archived per-route hits for this context
-      gw: /path/to/kant/new_experiment/region_v4/05_allcluster_lexicon/hits_gw/cbp/cl1/finemo_hits/hits.tsv
-  # AG at its NATIVE 2048bp window, not the 16384->2114 crop k562_ag_adopted uses.
-  # Same regions as the CBP side, so the two runs pair row-for-row; this is the run
-  # `lexicons.routes.*.ag2048` names.
-  k562_ag2048_adopted:
-    model: ag
-    adopt_from: /path/to/kant/new_experiment/region_v4/02_motif_grammar/interpret_ag2048_par_hyp/k562
-    adopt_peaks: peaks.bed
-    rows: 33917
-    in_window: 2048
-    crop: 2048
-    old_modisco: /path/to/kant/new_experiment/region_v4/02_motif_grammar/interpret_ag2048_par_hyp/k562/modisco.h5
-  gm12878_ag_adopted:
-    model: ag
-    adopt_from: /path/to/kant/new_experiment/region_v3/gm12878/interpret_ag_par_hyp
-    adopt_peaks: peaks.bed
-    rows: 21085
-    in_window: 16384
-    crop: 2114
-    old_modisco: /path/to/kant/new_experiment/region_v3/gm12878/interpret_ag_par_hyp/modisco.h5
-    old_hits: /path/to/kant/new_experiment/region_v3/gm12878/interpret_ag_par_hyp/finemo_hits/hits.tsv
+  # ---- GPN-Star (2026-09-07): the third model, computed by this pipeline ----
+  # Regions: the same 33,917 K562 peaks the CBP/AG runs were discovered on, in the
+  # 11-column form k562_cbp_adopted wrote (config/peaks/, the archive's own peaks.bed is
+  # gone). `head: 2000` is the pilot; drop it (and add n_shards) for the full set.
+  # `stride` and `source` are the run's two declared choices -- see attr_star.py.
+  k562_star_pilot:
+    model: star
+    peaks: config/peaks/k562_allpeaks_33917.bed
+    stride: 8            # positions p % 8 == r masked together; 8 passes per strand
+    source: none         # none = with the alignment; mask = human sequence only
+    head: 2000
+    in_window: 1536
+    chunk: 100
 
 # Canonical parameters. Every value here is the tool's own official default
 # (`--help` in envs/chrombpnet_local) unless the note says why it cannot be.
-# Full provenance, historical values and deviation reasons: README.md's parameter paragraph.
 modisco:
   max_seqlets: 1000000   # -n is REQUIRED by the CLI: no official default exists to adopt
   window: 400            # official default (was 500 in region_v3 / the vertical slice)
@@ -175,20 +91,21 @@ finemo:
   batch: 2000            # -b, official default (vertical slice ran 1000)
   # -s 3.0, -i 0.08, -j 0.7, -c 5e-4, -S 10000 left unset = official defaults
 
-# Reference lexicon: where pattern NAMES come from (2026-08-25). Not to be confused
-# with `lexicons:` below, which is about which motifs finemo scores against -- this
-# block never touches hit calling. Rationale: src/motifline/naming.py.
-#
-# sources -> union -> RSAT clustering -> medoid library + cluster-tagged union ->
-# TomTom -> two-armed gate. The libraries are the publishers' non-redundant releases
-# (HOCOMOCO H14CORE 1595 + JASPAR CORE vertebrates NR 1019 = 2614 matrices); they are
-# NOT de-duplicated further, because the match target has to be the full set.
+# Reference lexicon: where pattern NAMES come from (2026-08-25). Rationale:
+# src/motifline/naming.py. The chain is sources -> union -> RSAT clustering -> medoid
+# library + cluster-tagged union -> TomTom -> gate. Every rule reproduces an artifact
+# that was built once by hand for the manuscript; the pipeline versions were checked
+# against those and are byte-identical (union, medoid MEME, cluster-tagged union) or
+# equal within 1.1e-15 (the Ncor matrix).
 reference_lexicon:
+  # Concatenated in this order. Both are the publishers' own non-redundant releases;
+  # neither has been de-duplicated further, on purpose -- see naming.py on why the
+  # match target must be the full set.
   sources:
     H14: /path/to/hocomoco14_core.meme
     JAS: /path/to/jaspar2026_core_vert_nr.meme
   rsat:
-    bin: /path/to/envs/rsat/bin/rsat
+    bin: /path/to/kant/envs/rsat/bin/rsat      # rsat-core 2025.04.04
     hclust_method: average
     metric: Ncor
     # RSAT standalone defaults these to EMPTY; the values below are the web server's
@@ -197,8 +114,7 @@ reference_lexicon:
     # every other arm (matrix-clustering:2249-2257). Verified live -- a run given
     # `-lth w 5` alongside them reaches the R script as `lthsp = 'Ncor_0.55_cor_0.75_'`.
     # Declaring `w` here is refused rather than silently dropped. The Ncor comparability
-    # floor used elsewhere in the naming chain is a different number
-    # (motif_matrix.W_TH = 5, still hardcoded).
+    # floor used elsewhere in the naming chain is a different number (w_th below).
     lth:
       cor: 0.75
       Ncor: 0.55
@@ -209,70 +125,11 @@ reference_lexicon:
   # discards that under -quick) and NOT TomTom's -min-overlap (pinned to modiscolite's
   # parameter set). Three numbers that happen to be 5; this key owns two of them.
   w_th: 5
-  tomtom: /path/to/envs/meme/bin/tomtom
-  # Both arms required. ncor is set to rsat.lth.Ncor on purpose: "annotated" then means
-  # the clustering itself would have merged the pattern with its match.
+  tomtom: /path/to/kant/envs/meme/bin/tomtom
+  # Both arms required. qval is the conventional 0.05; ncor is set to rsat.lth.Ncor on
+  # purpose -- "annotated" then means the clustering itself would have merged the
+  # pattern with its match, which is what rules out significant-but-wrong labels
+  # (a repeat element carrying a TF half-site is the standard case).
   gate:
     qval: 0.05
     ncor: 0.55
-
-# External-lexicon hit calling: `-m` points at an archived lexicon instead of the
-# run's own modisco.h5. Paths transcribed from
-# new_experiment/region_v4/05_allcluster_lexicon/run_finemo.sh:39-51 (lexicon_for).
-lexicons:
-  batch: 1000            # -b. DEVIATION from the official 2000, kept from
-                         # run_finemo.sh:31-36: fit_contribs materialises
-                         # (b, n_motifs, 2065) three times, so b=2000 over the
-                         # 289-pattern union OOMs a 49 GiB card. Measured cost of
-                         # the change on the gw route, same lexicon and regions:
-                         # 54808 -> 54810 calls, 4 differ (0.0036%). Applied to
-                         # BOTH routes so the lexicon stays the only difference.
-  routes:
-    gw:                  # each model's own genome-wide MoDISco lexicon
-      cbp: /path/to/kant/new_experiment/region_v3/k562/interpret_cbp_par_hyp/modisco.h5
-      ag2048: /path/to/kant/new_experiment/region_v4/02_motif_grammar/interpret_ag2048_par_hyp/k562/modisco.h5
-
-# finemo 0.30-vs-0.41 comparison (README.md's parameter paragraph): rule call_hits_v041
-# reuses the regions.npz and modisco.h5 that the compute env's 0.30 produced and
-# calls hits with envs.finemo_alt -- that is the experiment.
-
-# Cross-model merges. What to merge is defined once (compendium.merges); how the
-# line FINISHES is motiflex (2026-08-17): every merge gets an annotated mlex tree,
-# and a merge that declares `thresholds` also gets a compiled medoid lexicon, which
-# is then cross-called back over every leaf (finemo, the leaf's own regions at its
-# native width) and reduced to occupancy / cross-leaf agreement tables (2026-08-20).
-# MotifCompendium remains the explicit-target comparison arm (rule merge_compendium),
-# which is the only consumer of the compendium tool block below.
-compendium:
-  env: /path/to/kant/envs/motifcompendium
-  src: /path/to/kant/models/MotifCompendium
-  algorithm: cpm_leiden
-  similarity_threshold: 0.9
-  seeds: [100, 200]
-  max_cpus: 16
-  use_gpu: false
-  cluster_within_posneg: true
-  quality_stats: true
-  merges:
-    # <name>:
-    #   thresholds:          # the merge criterion; omit -> registry+evidence only
-    #     Ncor: 0.55         # RSAT matrix-clustering's rule: a node merges only when
-    #     cor: 0.75          # the MEAN cross-pair value of EVERY arm clears its
-    #     w: 5               # threshold, and a failed node breaks the chain above it.
-    #   region_width: 500    # MC arm only
-    #   db_yaml: /path/db.yaml   # optional: freeze the labels mlex annotate proposes.
-    #                            # Default = results/merges/<name>/naming/db.yaml,
-    #                            # built by rule merge_naming from reference_lexicon.
-    #   leaves:
-    #     <label>: {run: <run name>}                       # this pipeline's own run
-    #     <label>: {h5: ..., attr: ..., ohe: ..., bed: ..., # external leaf: declared,
-    #               meta: {model: ..., readout: ..., union_id: ...,   # never derived
-    #                      training_celltype: ..., input_width: ..., context_window: ...}}
-    {}
-
-motiflex:
-  mlex: /path/to/kant/envs/mmv_verify/bin/mlex
-  celltype: K562
-  peak_universe_id: <declared peak universe id>
-  workers: 16
-  seed: 42
