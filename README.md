@@ -2,9 +2,10 @@
 
 A Snakemake pipeline from model attributions to MoDISco motifs to FiNeMo hits, one
 line per run, for **ChromBPNet** and **AlphaGenome** on the same downstream code path.
-Both models are attributed with DeepLIFT/SHAP hypothetical contributions through
-`tangermeme.deep_lift_shap`, so what differs between two runs is the model, not the
-attribution method.
+Both models are attributed with DeepLIFT/SHAP hypothetical contributions driven by
+`tangermeme.deep_lift_shap`, and everything from `attr/` onwards is byte-for-byte the
+same code for either model. The attribution step itself is not identical, and saying so
+matters — see "What DeepLIFT rules each model needs" below.
 
 No bespoke algorithms. Discovery is modisco-lite 2.4.0, hit calling is FiNeMo 0.30
 (pinned), pattern names come from an RSAT `matrix-clustering` lexicon over HOCOMOCO
@@ -53,6 +54,51 @@ the RSAT clustering, which is 1h46m).
 peaks files without a summit column — all of them in one pass, rather than failing
 inside whichever stage first reads the key that is wrong. A misspelling is not a
 cosmetic problem here: `n_shard: 4` is a perfectly valid single-process run.
+
+## What DeepLIFT rules each model needs
+
+`tangermeme.deep_lift_shap` does not support AlphaGenome out of the box. It ships a
+nonlinearity table for CNN-shaped models — the ReLU family, GELU, SiLU, Sigmoid, Tanh,
+Softplus, MaxPool, `nn.Softmax` — which is all **ChromBPNet** needs.
+
+**AlphaGenome** needs six more op types, supplied by `steps/ag_support.py` and passed in
+through tangermeme's `additional_nonlinear_ops=` hook. Three of the rules are not
+tangermeme's at all: they come from alphagenome-pytorch's own
+`attribution/deeplift.py`, as does the reference generator
+(`local_dinucleotide_shuffle`). One of them **overrides** tangermeme's built-in Softmax
+rule rather than adding to it.
+
+| op type | rule | count in the model |
+|---|---|---|
+| `layers.LayerNorm` | `deeplift.layernorm_symmetric_product_rule` (alphagenome-pytorch) | 43 |
+| `layers.QuickGELU` | tangermeme's generic `_nonlinear` | 37 |
+| `layers.BilinearOp` | `deeplift.bilinear_symmetric_product_rule` (alphagenome-pytorch) | 35 |
+| `nn.Softmax` | `deeplift.softmax_log_ratio_product_rule` — **replaces** tangermeme's `_softmax` | 16 |
+| `layers.SoftClip` | tangermeme's generic `_nonlinear` | 12 |
+| `layers.TanhSoftCap` | tangermeme's generic `_nonlinear` | 9 |
+| `layers.Log1p` | tangermeme's generic `_nonlinear` | on the wrapper, not in the model tree |
+
+So tangermeme supplies the SHAP machinery — hook registration, the reference-shuffling
+loop, hypothetical output, batching, convergence deltas — and alphagenome-pytorch
+supplies the model-specific DeepLIFT rules. This pipeline wires the two together and
+does not invent either.
+
+**Why the counts are in that table.** `tangermeme._register_hooks` returns silently for
+any module type it has no rule for: an unregistered nonlinearity is not an error and not
+a warning, it simply gets ordinary gradients. The convergence-delta check would catch
+the consequence, and both attribution steps pass `warning_threshold=1e8`, which disables
+it. Nothing at runtime would say the table had a hole.
+
+Measured instead, over `AlphaGenome()` built on the meta device at
+alphagenome-pytorch `64e9b75`: 639 modules, 45 distinct types, 209 of them covered.
+Everything uncovered is linear or structural — `Linear`, `Conv1d`,
+`StandardizedConv1d`, `Embedding`, `AvgPool1d`, the containers, and two that look like
+exceptions and are not: `RMSBatchNorm` (81) normalizes with *stored* running statistics
+(`x * inv + bias`, `inv` never a function of `x`), so it is affine; `Pool1d` (12) is a
+padding wrapper whose `nn.MaxPool1d`/`nn.AvgPool1d` children are hooked individually.
+
+That is a measurement of one model at one commit. An upstream change that introduces a
+new nonlinearity would be silent.
 
 ## Is this the official configuration?
 
