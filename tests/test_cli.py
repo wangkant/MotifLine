@@ -6,6 +6,7 @@ import sys
 import pytest
 import yaml
 
+from conftest import COMPUTE, has_compute
 from motifline import __version__
 from motifline.cli import find_workflow, main, snakemake_argv
 from test_config import cfg_cbp
@@ -136,14 +137,6 @@ def test_unknown_subcommand_is_rejected():
 
 
 # --- the official-configuration report ---------------------------------------
-
-import os, shutil
-COMPUTE = os.environ.get("MOTIFLINE_COMPUTE_ENV",
-                         "/path/to/envs/compute")
-has_compute = pytest.mark.skipif(
-    not shutil.which("modisco", path=f"{COMPUTE}/bin"),
-    reason="no compute env to read defaults from")
-
 
 def real_env_cfg(**over):
     c = cfg_cbp()

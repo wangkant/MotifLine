@@ -1,19 +1,11 @@
 """Reading the official defaults off the installed tools, and comparing config to them."""
 from __future__ import annotations
 
-import os
-import shutil
-
 import pytest
 
+from conftest import CHROMBPNET_SRC, COMPUTE, has_chrombpnet_src, has_compute
 from motifline.tools import (PINNED, deviations, parse_help_defaults, pinned_defaults,
                              tool_version)
-
-COMPUTE = os.environ.get("MOTIFLINE_COMPUTE_ENV",
-                         "/path/to/envs/compute")
-has_compute = pytest.mark.skipif(
-    not shutil.which("modisco", path=f"{COMPUTE}/bin"),
-    reason="no compute env to read defaults from")
 
 HELP = """usage: finemo call-hits [-h] [-M {pp,hp,ph,hh}] -r REGIONS
 
@@ -175,11 +167,10 @@ def test_a_moved_tool_default_renders_the_version_it_was_pinned_at():
 
 
 @has_compute
+@has_chrombpnet_src
 def test_a_checkout_that_provides_the_module_probes_importable():
     from motifline.tools import can_import
-    ok, detail = can_import("chrombpnet.bpnet",
-                            "/path/to/chrombpnet-pytorch",
-                            COMPUTE)
+    ok, detail = can_import("chrombpnet.bpnet", CHROMBPNET_SRC, COMPUTE)
     assert ok, detail
 
 
