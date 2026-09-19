@@ -58,3 +58,35 @@ def test_path_arguments_survive_into_the_label(tmp_path):
     run_body(tmp_path, ["true", tmp_path / "x.npy"], stage="discover")
     info = json.loads((tmp_path / "run_info.json").read_text())
     assert info["argv"][1] == str(tmp_path / "x.npy")
+
+
+# --- post-run checks ---------------------------------------------------------
+
+def test_a_check_runs_after_the_body_and_lands_in_the_label(tmp_path):
+    def saw_the_output(out_dir):
+        return {"body_wrote": (out_dir / "made.txt").read_text().strip()}
+    run_body(tmp_path, ["sh", "-c", f"echo hello > {tmp_path}/made.txt"],
+             stage="attribute", checks=(saw_the_output,))
+    info = json.loads((tmp_path / "run_info.json").read_text())
+    assert info["checks"]["body_wrote"] == "hello"
+
+
+def test_a_check_that_raises_is_recorded_and_does_not_lose_the_stage(tmp_path):
+    """A finished attribution costs GPU-days; its own label must not be able to kill it."""
+    def broken(out_dir):
+        raise RuntimeError("probe exploded")
+    run_body(tmp_path, ["true"], stage="attribute", checks=(broken,))
+    info = json.loads((tmp_path / "run_info.json").read_text())
+    assert "probe exploded" in str(info["checks"])
+
+
+def test_a_stage_with_no_checks_records_none(tmp_path):
+    run_body(tmp_path, ["true"], stage="discover")
+    assert json.loads((tmp_path / "run_info.json").read_text())["checks"] is None
+
+
+def test_a_checks_warning_is_printed_to_stderr(tmp_path, capfd):
+    def warns(out_dir):
+        return {"warning": "this array does not look hypothetical"}
+    run_body(tmp_path, ["true"], stage="attribute", checks=(warns,))
+    assert "does not look hypothetical" in capfd.readouterr().err

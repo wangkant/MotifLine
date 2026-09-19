@@ -1,0 +1,43 @@
+# What each tool's own defaults WERE at the version this pipeline's parameters were
+# chosen against. Read off `--help` of the installed binaries on 2026-09-19 and
+# hand-checked against that output, not transcribed from documentation.
+#
+# This exists for one comparison that a live reading cannot make: if a tool moves a
+# default and a config moves with it, config still matches the installed tool while no
+# longer being the configuration the published runs used. `motifline check` reports
+# that as `tool-default-moved`.
+#
+# To re-pin after a deliberate tool upgrade: read the new `--help`, check each changed
+# value is a change you meant to adopt, and edit `version` and the value here.
+# Bumping this table is how a tool upgrade gets acknowledged; it is not a formality.
+
+modisco-lite:
+  version: "2.4.0"
+  defaults:
+    final_flank_to_add: 0
+    initial_flank_to_add: 10
+    n_leiden: 2
+    seqlet_flank_size: 5
+    size: 20
+    trim_size: 30
+    verbose: false
+    window: 400
+  # -n/--max_seqlets is REQUIRED by the CLI and has no default; config must state it.
+
+finemo:
+  version: "0.30"
+  defaults:
+    batch-size: 2000
+    compile: false
+    convergence-tol: 0.0005
+    cwm-trim-threshold: 0.3
+    global-lambda: 0.7
+    max-steps: 10000
+    mode: pp
+    no-post-filter: false
+    sqrt-transform: false
+    step-adjust: 0.7
+    step-size-max: 3.0
+    step-size-min: 0.08
+  # --alpha and --motif-alphas are DEPRECATED in 0.30 in favour of --global-lambda
+  # and --motif-lambdas. config.finemo.alpha is passed as --global-lambda, NOT --alpha.

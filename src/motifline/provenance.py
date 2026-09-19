@@ -67,7 +67,7 @@ def tool_versions(env_prefix: str, packages: tuple[str, ...] = PACKAGES) -> dict
 
 def record(out_dir, *, stage: str, argv, param_sig: str | None = None,
            started: str | None = None, env_prefix: str | None = None,
-           packages: tuple[str, ...] = PACKAGES) -> Path:
+           packages: tuple[str, ...] = PACKAGES, checks: dict | None = None) -> Path:
     """Write ``run_info.json`` into a finished stage directory."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -81,6 +81,7 @@ def record(out_dir, *, stage: str, argv, param_sig: str | None = None,
         "param_sig": param_sig,
         "env": env_prefix,
         "tools": tool_versions(env_prefix, tuple(packages)) if env_prefix else None,
+        "checks": checks,
         "host": os.uname().nodename,
         "orchestrator_python": sys.version.split()[0],
     }

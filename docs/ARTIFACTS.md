@@ -14,6 +14,12 @@ written after the body succeeded and never before: `stage`, the exact `argv`, th
 environment reports, plus `host` and `started`/`finished`. Nothing reads it back
 and no stage refuses to run because of it — its presence means the stage finished.
 
+Stages that produce or adopt an attribution (`attribute`, `attribute_sharded`,
+`merge_shards`, `import_attr`) also carry `checks`, measured on the array they
+wrote: `hypothetical_fraction` = `frac(|attr| > 1e-9)` over the first 64 rows,
+`looks_hypothetical` = whether that is ≥ 0.99, and a `warning` when it is not.
+~1.0 is hypothetical, ~0.25 is projected; the two are otherwise identical on disk.
+
 Stage directories produced before 2026-08-14 also carry `params.json`,
 `provenance.json`, `run_status.json` and `guard_outcomes.json`. Those are
 historical records of the audit layer this pipeline used to run; the pipeline no

@@ -8,11 +8,19 @@ Snakefile is what makes those three things testable.
 The label is written **after** the body succeeds and never before. A ``run_info.json``
 next to a half-written array would be worse than no label at all: it would say a stage
 finished that did not.
+
+``checks`` are measurements taken on the finished output and written into the label --
+the attribution stages use them to record whether the array they produced is actually
+hypothetical. A check never decides whether the stage succeeded: one that raises is
+recorded as having raised, because a measurement able to fail a finished run would
+eventually be switched off, and an attribution that cost GPU-days is not deleted by
+its own label. A check that wants attention returns a ``warning``, which is printed.
 """
 from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from motifline.provenance import PACKAGES, now, record
@@ -20,12 +28,23 @@ from motifline.provenance import PACKAGES, now, record
 
 def run_body(out_dir, argv, *, stage: str, param_sig: str | None = None,
              env: dict | None = None, env_prefix: str | None = None,
-             packages: tuple[str, ...] = PACKAGES) -> Path:
+             packages: tuple[str, ...] = PACKAGES, checks=()) -> Path:
     """Run one stage body and label its directory. Raises if the body fails."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     started = now()
     subprocess.run([str(a) for a in argv], check=True,
                    env={**os.environ, **env} if env else None)
+
+    results: dict = {}
+    for fn in checks:
+        try:
+            results.update(fn(out_dir))
+        except Exception as e:
+            results[f"{getattr(fn, '__name__', 'check')}_error"] = f"{type(e).__name__}: {e}"
+    if results.get("warning"):
+        print(f"WARNING [{stage} {out_dir}]: {results['warning']}", file=sys.stderr)
+
     return record(out_dir, stage=stage, argv=argv, param_sig=param_sig,
-                  started=started, env_prefix=env_prefix, packages=packages)
+                  started=started, env_prefix=env_prefix, packages=packages,
+                  checks=results or None)

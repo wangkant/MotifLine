@@ -51,3 +51,14 @@ def test_normalize_refuses_unexpected_width(tmp_path):
     src = tmp_path / "p.bed"; src.write_text(ROW10 + "\tTrue\textra\n")
     with pytest.raises(ValueError, match="expected 10 or 11 columns"):
         _load_step().normalize_peaks_bed(str(src), str(tmp_path / "out"))
+
+
+def test_refuses_without_hypothetical_like_the_ag_path_does():
+    """Without the flag the step still runs and writes projected scores under the same
+    filenames -- indistinguishable downstream. attr_ag.py already refuses; this path
+    must too, or the two models are not symmetric in the one way that matters."""
+    r = subprocess.run([sys.executable, str(STEP), "--chrombpnet_src", "s",
+                        "--peaks", "p", "--out_dir", "o", "--wo_bias", "m",
+                        "--fasta", "f", "--chrom_sizes", "c"],
+                       capture_output=True, text=True)
+    assert r.returncode != 0 and "hypothetical" in (r.stderr + r.stdout)

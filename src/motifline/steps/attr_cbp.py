@@ -24,7 +24,8 @@ def parse_args():
     ap.add_argument("--fasta", required=True)
     ap.add_argument("--chrom_sizes", required=True)
     ap.add_argument("--task", default="counts", choices=["counts", "profile"])
-    ap.add_argument("--hypothetical", action="store_true")
+    ap.add_argument("--hypothetical", action="store_true",
+                    help="REQUIRED; projected scores are silently mixable with hypothetical ones")
     ap.add_argument("--batch_size", type=int, default=32)
     ap.add_argument("--in_window", type=int, default=2114)
     ap.add_argument("--random_state", type=int, default=42)
@@ -37,6 +38,12 @@ def parse_args():
                     help="split the peak list into N contiguous shards (full-scale runs)")
     ap.add_argument("--shard_i", type=int, default=None, help="index of the shard to compute, 0-based")
     a = ap.parse_args()
+    if not a.hypothetical:
+        ap.error("--hypothetical is required: without it this step writes PROJECTED "
+                 "scores under the same filenames and shapes, which every stage "
+                 "downstream consumes without complaint (attr_ag.py refuses the same "
+                 "way). Measure a finished array with frac(|attr| > 1e-9): ~1.0 is "
+                 "hypothetical, ~0.25 is projected.")
     if (a.shard_i is None) != (a.n_shards is None):
         ap.error("--shard_i and --n_shards must be given together")
     if a.n_shards is not None:

@@ -97,7 +97,20 @@ sharded, adopted, and cancelled. `motifline check` reports missing keys, misspel
 keys (`n_shard` would otherwise silently make a sharded run single-process), paths
 that do not exist and peaks files without a summit column — all of them in one pass.
 
-## 6. Does it work?
+## 6. Is it set up correctly?
+
+```bash
+motifline doctor
+```
+
+One page: the config and its problems, the tool versions the compute env actually
+reports, whether every parameter is on its tool's official default, the config-key →
+tool-flag mapping, and whether the model checkouts import the way the attribution steps
+import them. A deviating parameter is reported, never blocked.
+
+`doctor` exits non-zero on a config problem, never on a deviation.
+
+## 7. Does it work?
 
 ```bash
 motifline smoke
@@ -111,7 +124,7 @@ It covers the compute environment and the downstream half of the pipeline. It do
 **not** cover the attribution steps (they need real model weights) or the naming chain
 (it needs the RSAT clustering, which is 1h46m).
 
-## 7. Running
+## 8. Running
 
 ```bash
 motifline run -j 8 --gpus 2
@@ -125,8 +138,20 @@ or `modisco.window` leaves every finished stage in place and snakemake reports
 "Nothing to be done", so `results/` ends up holding a mixture of parameter generations
 that nothing on disk distinguishes from a coherent tree.
 
+Every `run` prints the parameter deviation report before it starts.
+
 GPU selection is the caller's. Export `CUDA_VISIBLE_DEVICES` to fully-free cards,
 pinned by UUID rather than index, and bound concurrency with `--gpus`.
+
+## Upgrading a tool
+
+`src/motifline/tool_defaults.yaml` pins what each tool's defaults were at the version
+this pipeline's parameters were chosen against. After a deliberate upgrade, run
+`motifline doctor`: any default the new version moved is listed. Decide for each one
+whether it is a change you meant to adopt, then edit the `version` and the value in
+that file. Re-pinning is how an upgrade gets acknowledged; it is not a formality, and
+it is the only thing that keeps "these are the official defaults" from quietly
+becoming "these were the official defaults in 2026".
 
 ## Reproducing the exact environment
 

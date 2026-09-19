@@ -35,4 +35,4 @@ Repository = "https://github.com/wangkant/motifline"
 where = ["src"]
 
 [tool.setuptools.package-data]
-motifline = ["config_skeleton.yaml"]
+motifline = ["config_skeleton.yaml", "tool_defaults.yaml"]

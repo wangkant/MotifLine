@@ -38,6 +38,7 @@ $ENVS/orchestration/bin/pip install -e .
 motifline init            # write config/default.yaml
 $EDITOR config/default.yaml
 motifline check           # every problem in the config at once, before anything runs
+motifline doctor          # one page: tool versions, parameters, model code
 motifline smoke           # does this installation work? ~1 min, CPU, no model needed
 motifline run -j 8 --gpus 2
 ```
@@ -52,6 +53,64 @@ the RSAT clustering, which is 1h46m).
 peaks files without a summit column — all of them in one pass, rather than failing
 inside whichever stage first reads the key that is wrong. A misspelling is not a
 cosmetic problem here: `n_shard: 4` is a perfectly valid single-process run.
+
+## Is this the official configuration?
+
+That this pipeline runs MoDISco and FiNeMo is not the point — anyone can run those.
+The point is that it runs them at the tools' own defaults, with the handful of
+deviations stated and argued. A claim like that is true on the day it is written and
+unchecked ever after, so here it is measured instead, against the binaries that are
+actually going to run:
+
+```
+$ motifline doctor
+compute env  /…/envs/compute
+  modisco-lite   2.4.0
+  finemo         0.30
+
+parameters
+  every parameter this pipeline sets is on its tool's official default
+
+  config key            -> tool flag
+  modisco.max_seqlets   -> modisco-lite --max_seqlets   [-n is required by the CLI; there is no default to adopt]
+  modisco.window        -> modisco-lite --window
+  finemo.mode           -> finemo --mode
+  finemo.threshold      -> finemo --cwm-trim-threshold   [-t trims the CWM; it is not a hit score threshold]
+  finemo.alpha          -> finemo --global-lambda   [passed as -l. finemo also has a DEPRECATED --alpha, which this is not]
+  finemo.batch          -> finemo --batch-size
+```
+
+Two comparisons, because one is not enough:
+
+- **config against the installed tool.** Both tools print `(default: X)` in `--help`,
+  so the defaults are read off the binary rather than from documentation.
+- **the installed tool against `src/motifline/tool_defaults.yaml`**, which records what
+  each default *was* at the pinned version. Without this second comparison, a tool that
+  moves a default is invisible whenever config moves with it: config would still match
+  the installed tool while no longer being the configuration the published runs used.
+
+Neither blocks. Deviating on purpose is ordinary science; deviating without knowing is
+the accident, and that is what these report. The mapping table is printed because it is
+not guessable: `finemo.threshold` is a CWM trim threshold and not a hit score, and
+`finemo.alpha` reaches `--global-lambda` while finemo *also* has a deprecated `--alpha`
+that means something else.
+
+## Was the attribution hypothetical?
+
+`--hypothetical` decides whether a score is stored for every base at every position or
+only for the base that is there. The two come out as arrays of the same shape, the same
+dtype and the same filename, and MoDISco consumes either without failing. Nothing in a
+run log tells them apart. The array does:
+
+```
+frac = (|attr| > 1e-9).mean()     ~1.00 hypothetical,  ~0.25 projected
+```
+
+Both attribution steps now refuse to run without the flag, and every stage that
+produces or adopts an attribution measures the array it ended up with and records the
+result in its `run_info.json`. An array that does not look hypothetical is reported
+loudly and not deleted — an attribution that cost GPU-days is not thrown away by its
+own label.
 
 ## Targets
 
@@ -80,8 +139,10 @@ config/default.yaml   runs + shared parameters + site paths (yours; not in git)
 config/example.yaml   a worked config with an entry of each kind
 config/peaks/         a 33,917-peak K562 list in the 11-column narrowPeak form
 envs/                 environment recipes; envs/locks/ the exact trees we ran
-src/motifline/        cli, config validation, provenance, adopt, merge_shards,
-                      naming, runs, smoke, stages  (orchestration env)
+src/motifline/        cli, config validation, tool-default checking, provenance,
+                      adopt, attribution, merge_shards, naming, runs, smoke, stages
+                      (orchestration env)
+  tool_defaults.yaml  what each tool's defaults were at the version pinned here
 src/motifline/steps/  attr_cbp.py, attr_ag.py (+ ag_support.py), lexicon_*.py,
                       name_patterns.py (+ motif_matrix.py)
                       -- compute-env scripts; they never import motifline
@@ -165,7 +226,8 @@ concurrency with `--gpus <G>`.
 Every stage writes a `run_info.json` next to its output once its body has succeeded:
 the stage name, the exact argv, the parameter signature it reran on, the environment
 prefix and the versions that environment reports for FiNeMo, modisco-lite, tangermeme,
-torch and numpy, plus host and timestamps.
+torch and numpy, plus host, timestamps, and any `checks` that stage measured on its own
+output — for the attribution stages, the hypothetical fraction above.
 
 It is written after the body succeeds and never before, so a `run_info.json` means the
 stage finished. Nothing in the pipeline reads it back and no stage refuses to run
@@ -186,7 +248,8 @@ put the checkout named by `chrombpnet_src` / a run's `ag_src` on `sys.path` them
 
 ## House rules
 
-- Attributions are HYPOTHETICAL (`--hypothetical`), always.
+- Attributions are HYPOTHETICAL (`--hypothetical`), always. Both steps refuse without
+  it, and the array is measured afterwards rather than taken on trust.
 - Hits are produced by FiNeMo 0.30; the version is not interchangeable with 0.41. Note
   it next to any hits you keep — `run_info.json` records it for you.
 - Peaks fed to FiNeMo must be 10/11-column narrowPeak with the summit in column 10;
@@ -226,19 +289,6 @@ ChromBPNet, AlphaGenome, tangermeme, FiNeMo, HOCOMOCO and JASPAR should be cited
 their current project pages; take the reference from the source rather than from here.
 
 `CITATION.cff` covers this pipeline itself.
-
-## History
-
-**2026-09-19.** The GPN-Star line was removed: `steps/attr_star.py`, the `star` model,
-its environment and config blocks, and the `k562_star_pilot` run. The pipeline is two
-models again. Git history before this commit has it.
-
-**2026-09-07** (branch `linear`). The cross-model merge (motiflex stages,
-MotifCompendium comparison arm, cross-call and occupancy), the external-lexicon
-hit-calling routes and the FiNeMo 0.30-vs-0.41 arm were removed. Cross-model work is
-done outside this pipeline now, on each run's own `modisco.h5` / `hits.tsv`.
-`geometry.py` went with them: a run's attribution width is read off `attr.npy`, not
-derived from config.
 
 ## License
 

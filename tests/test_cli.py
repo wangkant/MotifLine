@@ -133,3 +133,62 @@ def test_run_outside_a_workflow_fails_with_a_message_naming_the_snakefile(tmp_pa
 def test_unknown_subcommand_is_rejected():
     with pytest.raises(SystemExit):
         main(["frobnicate"])
+
+
+# --- the official-configuration report ---------------------------------------
+
+import os, shutil
+COMPUTE = os.environ.get("MOTIFLINE_COMPUTE_ENV",
+                         "/path/to/envs/compute")
+has_compute = pytest.mark.skipif(
+    not shutil.which("modisco", path=f"{COMPUTE}/bin"),
+    reason="no compute env to read defaults from")
+
+
+def real_env_cfg(**over):
+    c = cfg_cbp()
+    c["envs"]["compute"] = COMPUTE
+    for k, v in over.items():
+        section, key = k.split("_", 1)
+        c[section][key] = v
+    return c
+
+
+@has_compute
+def test_check_states_that_the_parameters_are_the_tools_own_defaults(tmp_path, capsys):
+    cfg = write_cfg(tmp_path, real_env_cfg())
+    assert main(["check", "-c", str(cfg), "--no-paths"]) == 0
+    assert "official default" in capsys.readouterr().out
+
+
+@has_compute
+def test_a_deviating_parameter_is_reported_but_does_not_fail_the_check(tmp_path, capsys):
+    """Deviating on purpose is ordinary science; this is a report, not a refusal."""
+    cfg = write_cfg(tmp_path, real_env_cfg(modisco_window=500))
+    assert main(["check", "-c", str(cfg), "--no-paths"]) == 0
+    out = capsys.readouterr().out
+    assert "modisco.window" in out and "500" in out and "400" in out
+
+
+@has_compute
+def test_doctor_reports_the_tool_versions_the_compute_env_actually_has(tmp_path, capsys):
+    cfg = write_cfg(tmp_path, real_env_cfg())
+    main(["doctor", "-c", str(cfg)])
+    out = capsys.readouterr().out
+    assert "finemo" in out and "0.30" in out
+
+
+@has_compute
+def test_doctor_fails_on_a_broken_config_not_on_a_deviation(tmp_path, capsys):
+    ok = write_cfg(tmp_path, real_env_cfg(modisco_window=500), name="ok.yaml")
+    assert main(["doctor", "-c", str(ok), "--no-paths"]) == 0
+    broken = real_env_cfg()
+    del broken["genome"]
+    bad = write_cfg(tmp_path, broken, name="bad.yaml")
+    assert main(["doctor", "-c", str(bad), "--no-paths"]) != 0
+
+
+def test_doctor_without_a_readable_compute_env_says_so_instead_of_crashing(tmp_path, capsys):
+    cfg = write_cfg(tmp_path)          # envs.compute is /e/compute, which is not there
+    main(["doctor", "-c", str(cfg), "--no-paths"])
+    assert "could not" in capsys.readouterr().out.lower()

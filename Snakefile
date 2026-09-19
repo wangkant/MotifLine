@@ -18,6 +18,7 @@ import numpy as np
 configfile: "config/default.yaml"
 
 from motifline import naming as nm
+from motifline.attribution import hyp_check
 from motifline.config import check as check_config
 from motifline.runs import active_runs, cancelled_runs
 from motifline.stages import run_body as _run_body
@@ -61,7 +62,8 @@ def sig_naming(w=None):
                      w_th=nm.w_th(config))
 
 
-def run_body(out_dir, argv, stage, env=None, prefix=None, sig=None, packages=None):
+def run_body(out_dir, argv, stage, env=None, prefix=None, sig=None, packages=None,
+             checks=()):
     """Run a stage body and, once it succeeds, label the directory it wrote.
 
     Thin wrapper over motifline.stages.run_body so that every rule states the same
@@ -71,7 +73,7 @@ def run_body(out_dir, argv, stage, env=None, prefix=None, sig=None, packages=Non
     """
     kw = {} if packages is None else {"packages": packages}
     return _run_body(out_dir, argv, stage=stage, param_sig=sig, env=env,
-                     env_prefix=ENV if prefix is None else prefix, **kw)
+                     env_prefix=ENV if prefix is None else prefix, checks=checks, **kw)
 
 # One shard per GPU with 8 threads was the measured optimum for AG (run_ag_par_hyp.sh:14-16);
 # without a cap the process oversubscribes the node's cores.
@@ -190,7 +192,8 @@ rule import_attr:
         argv = [ORCH_PY, "-m", "motifline.adopt", "--src_dir", src, "--out_dir", out,
                 "--expected_rows", str(r["rows"]),
                 "--peaks_name", r.get("adopt_peaks", "peaks.bed")]
-        run_body(out, argv, "import_attr", prefix=ORCH_PREFIX, sig=params.sig)
+        run_body(out, argv, "import_attr", prefix=ORCH_PREFIX, sig=params.sig,
+                 checks=(hyp_check(),))
 
 rule attribute:
     output: "results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy", "results/{run}/attr/regions.bed"
@@ -201,7 +204,7 @@ rule attribute:
         r = rundef(wildcards)
         out = f"results/{wildcards.run}/attr"
         run_body(out, attr_argv(r, out), "attribute", env=COMPUTE_THREADS,
-                 sig=params.sig)
+                 sig=params.sig, checks=(hyp_check(),))
 
 rule attribute_sharded:
     """One shard of a full-scale attribution: its own stage dir, its own card."""
@@ -216,7 +219,7 @@ rule attribute_sharded:
         i = int(wildcards.i)
         out = f"results/{wildcards.run}/attr_shards/shard_{i}"
         run_body(out, attr_argv(r, out, shard_i=i), "attribute_sharded",
-                 env=COMPUTE_THREADS, sig=params.sig)
+                 env=COMPUTE_THREADS, sig=params.sig, checks=(hyp_check(f"attr_{i}.npy"),))
 
 rule merge_shards:
     """Concatenate the shards in shard order into the one attr/ohe/regions triple
@@ -234,7 +237,8 @@ rule merge_shards:
             argv += ["--shard_dir", d]
         if r.get("rows"):
             argv += ["--expected_rows", str(r["rows"])]
-        run_body(out, argv, "merge_shards", prefix=ORCH_PREFIX, sig=params.sig)
+        run_body(out, argv, "merge_shards", prefix=ORCH_PREFIX, sig=params.sig,
+                 checks=(hyp_check(),))
 
 ATTR_FILES = ["results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy",
               "results/{run}/attr/regions.bed"]
