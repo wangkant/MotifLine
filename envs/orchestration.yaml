@@ -1,0 +1,14 @@
+# The env snakemake and this package run in. Nothing scientific happens here: it
+# assembles command lines and hands them to the compute env.
+#
+#   conda env create -p <kant>/envs/motifline -f envs/orchestration.yaml
+#   <kant>/envs/motifline/bin/pip install -e .
+#
+# Exact tree of the machine these runs were produced on: envs/locks/orchestration.*
+name: motifline-orchestration
+channels: [conda-forge]
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - snakemake>=8

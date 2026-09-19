@@ -5,3 +5,6 @@ results/
 logs/
 .gpu_locks/
 config/default.yaml
+build/
+dist/
+*.whl

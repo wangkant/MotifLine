@@ -1,6 +1,6 @@
 # Snakefile -- one line per run:
 #
-#     attribute (cbp | ag | star)  ->  discover  ->  extract_regions  ->  call_hits
+#     attribute (cbp | ag)  ->  discover  ->  extract_regions  ->  call_hits
 #                                            \->  name_patterns
 #     built once:  lexicon_union -> lexicon_rsat -> lexicon_medoid -> lexicon_cltagged
 #
@@ -10,7 +10,6 @@
 # read off the array (attr_width below), not derived from config.
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -19,12 +18,16 @@ import numpy as np
 configfile: "config/default.yaml"
 
 from motifline import naming as nm
+from motifline.config import check as check_config
 from motifline.runs import active_runs, cancelled_runs
+from motifline.stages import run_body as _run_body
+
+# Structure only: the DAG has to build on a machine where the archives have moved.
+# `motifline check` is the same validator with the filesystem included.
+check_config(config, paths=False)
 
 ENV = config["envs"]["compute"]
 PY = f"{ENV}/bin/python"
-# GPN-Star runs in its own env: its torch (2.6.0+cu124) is not the compute env's.
-PY_STAR = f"{config['envs']['star']}/bin/python"
 STEPS = Path(workflow.basedir) / "src/motifline/steps"
 
 def rundef(w):
@@ -58,11 +61,17 @@ def sig_naming(w=None):
                      w_th=nm.w_th(config))
 
 
-def run_body(out_dir, argv, env=None):
-    """Make the stage directory and run the stage body in it."""
-    os.makedirs(out_dir, exist_ok=True)
-    subprocess.run([str(a) for a in argv], check=True,
-                   env={**os.environ, **env} if env else None)
+def run_body(out_dir, argv, stage, env=None, prefix=None, sig=None, packages=None):
+    """Run a stage body and, once it succeeds, label the directory it wrote.
+
+    Thin wrapper over motifline.stages.run_body so that every rule states the same
+    three things: which stage this is, which env ran it, and the parameter signature
+    it reran on. ``prefix`` defaults to the compute env, which is what all but the
+    orchestration rules use.
+    """
+    kw = {} if packages is None else {"packages": packages}
+    return _run_body(out_dir, argv, stage=stage, param_sig=sig, env=env,
+                     env_prefix=ENV if prefix is None else prefix, **kw)
 
 # One shard per GPU with 8 threads was the measured optimum for AG (run_ag_par_hyp.sh:14-16);
 # without a cap the process oversubscribes the node's cores.
@@ -90,7 +99,7 @@ def attr_argv(r, out, shard_i=None):
     (``attr_<i>.npy``/... when a shard index is given).
 
     Window sizes are passed only when the run entry declares them; otherwise the step's
-    own defaults apply (cbp 2114; ag 2048 in / 2048 stored; star 1536).
+    own defaults apply (cbp 2114; ag 2048 in / 2048 stored).
     """
     model = r["model"]
     if model in ("cbp", "ag"):
@@ -118,19 +127,8 @@ def attr_argv(r, out, shard_i=None):
                 "--n_shuffles", n_shuffles, "--random_state", random_state]
         if "in_window" in r:
             argv += ["--in_window", str(r["in_window"])]
-    elif model == "star":
-        s = config["star"]
-        argv = [PY_STAR, str(STEPS / "attr_star.py"),
-                "--peaks", r["peaks"], "--chrom_sizes", config["genome"]["chrom_sizes"],
-                "--out_dir", out,
-                "--msa_path", r.get("msa_path", s["msa_path"]),
-                "--repo", r.get("repo", s["repo"]),
-                "--stride", str(r["stride"]), "--source", r["source"],
-                "--chunk", str(r.get("chunk", s.get("chunk", 100)))]
-        if "in_window" in r:
-            argv += ["--in_window", str(r["in_window"])]
     else:
-        raise ValueError(f"unknown model {model!r}; expected 'cbp', 'ag' or 'star'")
+        raise ValueError(f"unknown model {model!r}; expected 'cbp' or 'ag'")
     if r.get("head"):
         argv += ["--head", str(r["head"])]
     if shard_i is not None:
@@ -138,6 +136,7 @@ def attr_argv(r, out, shard_i=None):
     return argv
 
 ORCH_PY = sys.executable  # the python running snakemake == the motifline orchestration env
+ORCH_PREFIX = sys.prefix
 
 # GPU selection is the caller's: export CUDA_VISIBLE_DEVICES=<uuid> before running,
 # and bound concurrency with --resources gpu=<G>. House rules stay the same --
@@ -191,7 +190,7 @@ rule import_attr:
         argv = [ORCH_PY, "-m", "motifline.adopt", "--src_dir", src, "--out_dir", out,
                 "--expected_rows", str(r["rows"]),
                 "--peaks_name", r.get("adopt_peaks", "peaks.bed")]
-        run_body(out, argv)
+        run_body(out, argv, "import_attr", prefix=ORCH_PREFIX, sig=params.sig)
 
 rule attribute:
     output: "results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy", "results/{run}/attr/regions.bed"
@@ -201,7 +200,8 @@ rule attribute:
     run:
         r = rundef(wildcards)
         out = f"results/{wildcards.run}/attr"
-        run_body(out, attr_argv(r, out), env=COMPUTE_THREADS)
+        run_body(out, attr_argv(r, out), "attribute", env=COMPUTE_THREADS,
+                 sig=params.sig)
 
 rule attribute_sharded:
     """One shard of a full-scale attribution: its own stage dir, its own card."""
@@ -215,7 +215,8 @@ rule attribute_sharded:
         r = rundef(wildcards)
         i = int(wildcards.i)
         out = f"results/{wildcards.run}/attr_shards/shard_{i}"
-        run_body(out, attr_argv(r, out, shard_i=i), env=COMPUTE_THREADS)
+        run_body(out, attr_argv(r, out, shard_i=i), "attribute_sharded",
+                 env=COMPUTE_THREADS, sig=params.sig)
 
 rule merge_shards:
     """Concatenate the shards in shard order into the one attr/ohe/regions triple
@@ -233,7 +234,7 @@ rule merge_shards:
             argv += ["--shard_dir", d]
         if r.get("rows"):
             argv += ["--expected_rows", str(r["rows"])]
-        run_body(out, argv)
+        run_body(out, argv, "merge_shards", prefix=ORCH_PREFIX, sig=params.sig)
 
 ATTR_FILES = ["results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy",
               "results/{run}/attr/regions.bed"]
@@ -248,7 +249,7 @@ rule discover:
         argv = [f"{ENV}/bin/modisco", "motifs", "-s", f"{attr_dir}/ohe.npy",
                 "-a", f"{attr_dir}/attr.npy", "-n", str(config["modisco"]["max_seqlets"]),
                 "-w", str(config["modisco"]["window"]), "-o", f"{out}/modisco.h5"]
-        run_body(out, argv, env=COMPUTE_THREADS)
+        run_body(out, argv, "discover", env=COMPUTE_THREADS, sig=params.sig)
 
 rule extract_regions:
     """Package attr/ohe/regions for finemo at the width the array actually is."""
@@ -261,7 +262,7 @@ rule extract_regions:
                 "-s", f"{attr_dir}/ohe.npy", "-a", f"{attr_dir}/attr.npy",
                 "-p", f"{attr_dir}/regions.bed", "-o", f"{out}/regions.npz",
                 "-w", str(attr_width(wildcards.run))]
-        run_body(out, argv)
+        run_body(out, argv, "extract_regions")
 
 rule call_hits:
     input: npz=rules.extract_regions.output, lex=rules.discover.output
@@ -277,7 +278,7 @@ rule call_hits:
                 "-r", f"{reg_dir}/regions.npz", "-m", f"{mod_dir}/modisco.h5",
                 "-o", out, "-t", str(f["threshold"]), "-l", str(f["alpha"]),
                 "-b", str(f["batch"])]
-        run_body(out, argv)
+        run_body(out, argv, "call_hits", sig=params.sig)
 
 # ---------------------------------------------------------------------------
 # Reference lexicon and pattern naming (2026-08-25). One library, built once, for
@@ -295,7 +296,7 @@ rule lexicon_union:
     run:
         argv = [PY, str(STEPS / "lexicon_union.py"), *nm.source_argv(config),
                 "--out", output[0]]
-        run_body(Path(output[0]).parent, argv)
+        run_body(Path(output[0]).parent, argv, "lexicon_union", sig=params.sig)
 
 rule lexicon_rsat:
     """RSAT matrix-clustering over the union: THE partition, computed by RSAT itself.
@@ -312,8 +313,11 @@ rule lexicon_rsat:
         out = nm.RSAT_DIR
         os.makedirs(out, exist_ok=True)
         rsat_bin = Path(nm.rsat(config)["bin"]).parent
-        run_body(out, nm.rsat_argv(config, input[0], f"{out}/rsat"),
-                 env={"PATH": f"{rsat_bin}:{os.environ['PATH']}"})
+        # RSAT is not a python env worth probing; the launcher is in argv instead.
+        run_body(out, nm.rsat_argv(config, input[0], f"{out}/rsat"), "lexicon_rsat",
+                 env={"PATH": f"{rsat_bin}:{os.environ['PATH']}"},
+                 prefix=str(Path(nm.rsat(config)["bin"]).parent.parent),
+                 packages=(), sig=params.sig)
         # The launcher cannot report failure (see naming.rsat_argv), and snakemake only
         # checks that clusters.tab exists -- which it would, left over from a previous
         # run at different thresholds. Check the partition covers the union it was given.
@@ -335,7 +339,8 @@ rule lexicon_medoid:
         argv = [PY, str(STEPS / "lexicon_medoid.py"), "--clusters_tab", input.tab,
                 *nm.source_argv(config), "--w_th", str(nm.w_th(config)),
                 "--out_dir", nm.LEXICON_DIR]
-        run_body(nm.LEXICON_DIR, argv, env=COMPUTE_THREADS)
+        run_body(nm.LEXICON_DIR, argv, "lexicon_medoid", env=COMPUTE_THREADS,
+                 sig=params.sig)
 
 rule lexicon_cltagged:
     """The union with cluster ids prefixed onto the names: the TomTom target."""
@@ -345,7 +350,7 @@ rule lexicon_cltagged:
         argv = [PY, str(STEPS / "lexicon_cltagged.py"), "--union", input.union,
                 "--clusters", input.clusters, "--metadata", input.metadata,
                 "--out", output[0]]
-        run_body(nm.LEXICON_DIR, argv)
+        run_body(nm.LEXICON_DIR, argv, "lexicon_cltagged")
 
 rule name_patterns:
     """One run's MoDISco patterns -> cluster-level names, with the gate applied."""
@@ -363,4 +368,4 @@ rule name_patterns:
                 "--tomtom", nm.params(config)["tomtom"],
                 "--w_th", str(nm.w_th(config)),
                 "--gate_q", str(q), "--gate_ncor", str(ncor), "--out_dir", out]
-        run_body(out, argv, env=COMPUTE_THREADS)
+        run_body(out, argv, "name_patterns", env=COMPUTE_THREADS, sig=params.sig)

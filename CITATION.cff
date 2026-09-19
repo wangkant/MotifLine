@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use motifline, please cite it together with the tools it runs (see README)."
+title: motifline
+abstract: >-
+  A Snakemake pipeline from model attributions to MoDISco motifs to FiNeMo hits,
+  one line per run, for ChromBPNet and AlphaGenome on the same downstream code
+  path, with pattern names assigned from an RSAT-clustered HOCOMOCO/JASPAR lexicon.
+type: software
+authors:
+  - family-names: Wang
+    given-names: Kant
+    alias: wangkant
+repository-code: "https://github.com/wangkant/motifline"
+license: MIT
+version: 0.1.0.dev0
+keywords:
+  - genomics
+  - regulatory genomics
+  - transcription factor motifs
+  - chromatin accessibility
+  - ChromBPNet
+  - TF-MoDISco
+  - Snakemake

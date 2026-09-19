@@ -1,20 +1,38 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "motifline"
 version = "0.1.0.dev0"
-description = "Snakemake attribution->MoDISco->FiNeMo pipeline"
+description = "Attribution -> MoDISco -> FiNeMo, one line per run, for ChromBPNet and AlphaGenome"
+readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["numpy", "pandas", "snakemake>=8"]
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Kant Wang" }]
+keywords = ["genomics", "regulatory", "motifs", "chrombpnet", "modisco", "snakemake"]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Programming Language :: Python :: 3",
+]
+# pyyaml is a runtime dependency, not a test one: the Snakefile validates its config
+# through motifline.config before it builds the DAG. h5py is one because `motifline
+# smoke` reads the patterns it discovered back out of modisco.h5.
+dependencies = ["numpy", "pandas", "pyyaml", "h5py", "snakemake>=8"]
 
 [project.optional-dependencies]
-# h5py and pyyaml are test-time imports: tests/test_naming.py loads the step scripts
-# (name_patterns imports h5py) and test_lexicon_context_is_subset imports yaml. A
-# collection error aborts the whole session, so leaving them out cost all 73 tests,
-# not one file.
-dev = ["pytest", "h5py", "pyyaml", "scipy"]
+dev = ["pytest", "scipy"]
+
+[project.scripts]
+motifline = "motifline.cli:main"
+
+[project.urls]
+Repository = "https://github.com/wangkant/motifline"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+motifline = ["config_skeleton.yaml"]

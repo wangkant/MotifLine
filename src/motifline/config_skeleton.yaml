@@ -1,0 +1,63 @@
+# motifline config. Written by `motifline init`; check it with `motifline check`.
+#
+# Paths are absolute, or relative to the directory you run motifline from. Every
+# section below is required; delete the model blocks you do not use, and `motifline
+# check` will tell you if you deleted one that a run still needs.
+
+envs:
+  # Prefixes built from envs/*.yaml -- see docs/INSTALL.md.
+  compute: /path/to/envs/compute      # torch, chrombpnet, tangermeme, modisco-lite, finemo
+
+# Model source checkouts (not pip packages). Pin the commits in docs/INSTALL.md.
+chrombpnet_src: /path/to/chrombpnet-pytorch
+
+genome:
+  fasta: /path/to/hg38.fa
+  chrom_sizes: /path/to/hg38.chrom.sizes
+
+# DeepLIFT/SHAP references for cbp and ag. tangermeme seeds each reference from
+# random_state and the shuffle index, so the count and the seed are what change the
+# output; both are stated here rather than inherited from a library signature.
+attribution:
+  n_shuffles: 20
+  random_state: 42
+
+# MoDISco. -n has no official default and must be given; -w 400 is modiscolite's.
+modisco:
+  max_seqlets: 1000000
+  window: 400
+
+# FiNeMo 0.30. Every value here is the tool's own official default.
+finemo:
+  mode: pp
+  threshold: 0.3
+  alpha: 0.7
+  batch: 2000
+
+# Where pattern names come from. Built once and shared by every run; the rationale
+# for each decision is in src/motifline/naming.py.
+reference_lexicon:
+  sources:
+    H14: /path/to/hocomoco14_core.meme
+    JAS: /path/to/jaspar2026_core_vert_nr.meme
+  rsat:
+    bin: /path/to/envs/rsat/bin/rsat
+    hclust_method: average
+    metric: Ncor
+    # RSAT standalone leaves these empty; these are the web server's documented
+    # defaults and have to be passed explicitly or the clustering differs. Under
+    # -quick RSAT keeps only Ncor and cor and silently drops every other arm.
+    lth:
+      cor: 0.75
+      Ncor: 0.55
+    quick: true
+  w_th: 5
+  tomtom: /path/to/envs/meme/bin/tomtom
+  gate:
+    qval: 0.05
+    ncor: 0.55
+
+# One entry per run. `model` picks the attribution step; what else the entry needs
+# follows from that and from whether it computes or adopts. `motifline check` lists
+# the missing keys. See config/example.yaml for worked entries of each kind.
+runs: {}

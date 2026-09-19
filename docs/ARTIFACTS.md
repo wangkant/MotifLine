@@ -8,6 +8,12 @@ after its target reruns clean.
 Shapes and dtypes below were read off `results/k562_cbp_full` and
 `results/k562_ag_adopted` (2026-08-14), not from the code that intends them.
 
+Every stage directory also carries a **`run_info.json`** (since 2026-09-19),
+written after the body succeeded and never before: `stage`, the exact `argv`, the
+`param_sig` the rule reruns on, the `env` prefix and the `tools` versions that
+environment reports, plus `host` and `started`/`finished`. Nothing reads it back
+and no stage refuses to run because of it — its presence means the stage finished.
+
 Stage directories produced before 2026-08-14 also carry `params.json`,
 `provenance.json`, `run_status.json` and `guard_outcomes.json`. Those are
 historical records of the audit layer this pipeline used to run; the pipeline no
@@ -25,7 +31,7 @@ longer writes or reads them.
 
 `W` is whatever width the step stored, and every downstream stage reads it off
 `attr.npy` (the Snakefile's `attr_width`; `geometry.py` was removed 2026-09-07). The
-steps' own defaults: **CBP 2114, AG 2048, GPN-Star 1536** — each model attributes its
+steps' own defaults: **CBP 2114, AG 2048** — each model attributes its
 native window and stores all of it. Runs that declare the older AG geometry (16384bp
 window, central crop to 2114) keep it, because that is what their archived arrays are.
 Sharded runs write `attr_<i>.npy` / `ohe_<i>.npy` /
@@ -42,10 +48,8 @@ expands its 4-column `(chr,start,end,summit)` frame to the same 11 columns
 **`N` is not necessarily `len(peaks.bed)`.** Every step drops regions whose
 window runs off the chromosome (`summit ± in_window/2`), and the models then
 handle ambiguous bases differently: CBP additionally drops any row containing an
-`0.25` (N) column or an all-zero column (`attr_cbp.py:129-134`), AG fills
-`N → A` and keeps the row, so that the AG region set stays equal to CBP's, and
-GPN-Star drops the row (plus rows on chromosomes the alignment store lacks) and
-lists them in `n_dropped.tsv` (`chr, start, summit, reason`). This is
+`0.25` (N) column or an all-zero column (`attr_cbp.py:129-134`), while AG fills
+`N → A` and keeps the row, so that the AG region set stays equal to CBP's. This is
 why `regions.bed` — not `peaks.bed` — is the row key for everything downstream.
 
 That fill used to be free: at the 16384 → 2114 geometry the N's were in flanks the
@@ -73,17 +77,6 @@ shard index). Resuming onto checkpoints computed under different values is **ref
 the resume test was previously the chunk index alone, so changing a run's `track` or
 `n_shuffles` and re-running produced an `attr.npy` concatenated from two parameter
 generations, silently.
-
-### GPN-Star (`attr_star.py`) — `attr/` and `_chunks_<i>/`
-
-`attr.npy` holds `softmax(logits) − 1/4` at every position, both strands averaged
-(the recipe of songlab's `modisco_run.py`); `ohe.npy` is the human column of the
-alignment. The window is masked in `stride` groups per strand (positions
-`p % stride == r` together), the run's declared `stride`/`source` are in
-`_chunks_<i>/chunk_identity.json` with the rest of the chunk identity, and the
-per-chunk files are `attr_<c>.npy` / `ohe_<c>.npy` / `regions_<c>.bed` /
-`dropped_<c>.tsv`, resumed by existence exactly as AG's. `regions.bed` is the
-concatenation of the per-chunk beds, so it lists kept rows only.
 
 ## `import_attr` → `attr/`
 

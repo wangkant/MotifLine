@@ -1,9 +1,8 @@
-kant: /path/to/kant
 envs:
   compute: /path/to/kant/envs/chrombpnet_local   # torch, chrombpnet, tangermeme, modisco-lite, finemo 0.30
-  star: /path/to/kant/envs/gpn_star              # GPN-Star only: torch 2.6.0+cu124 + gpn 0.9.0 (attr_star.py)
 chrombpnet_src: /path/to/kant/models/chrombpnet-pytorch
-ag_src: /path/to/kant/models/alphagenome-pytorch-deeplift/src
+# A computed AlphaGenome run declares `ag_src` in its OWN entry, not here: attr_argv
+# reads r["ag_src"], so a top-level key of that name is never read by anything.
 genome:
   fasta: /path/to/kant/data/genome/hg38.fa
   chrom_sizes: /path/to/kant/data/genome/hg38.chrom.sizes
@@ -19,15 +18,8 @@ attribution:
 
 # Attribution windows are NOT configured here any more (geometry.py removed 2026-09-07):
 # a run that declares in_window/crop passes them to its step, an unspecified run gets
-# the step's own default (cbp 2114; ag 2048 in / 2048 stored; star 1536), and every
+# the step's own default (cbp 2114; ag 2048 in / 2048 stored), and every
 # downstream stage reads the width off attr.npy itself.
-
-# GPN-Star (steps/attr_star.py): model from HF, alignment from the zarr stores that
-# new_experiment/star/scripts/02_download_msa.sh downloaded. A run may override either.
-star:
-  msa_path: /path/to/kant/data/gpn_star_msa/multiz100way
-  repo: songlab/gpn-star-hg38-v100-200m
-  chunk: 100
 
 runs:
   # ---- adopted runs: archived attributions linked in, downstream recomputed ----
@@ -64,19 +56,29 @@ runs:
     adopt_peaks: peaks.bed
     rows: 21084
     in_window: 2114
-  # ---- GPN-Star (2026-09-07): the third model, computed by this pipeline ----
-  # Regions: the same 33,917 K562 peaks the CBP/AG runs were discovered on, in the
-  # 11-column form k562_cbp_adopted wrote (config/peaks/, the archive's own peaks.bed is
-  # gone). `head: 2000` is the pilot; drop it (and add n_shards) for the full set.
-  # `stride` and `source` are the run's two declared choices -- see attr_star.py.
-  k562_star_pilot:
-    model: star
+  # ---- computed runs: this pipeline does the attribution ----
+  # A run with neither `adopt_from` nor `n_shards` attributes in one process; add
+  # `n_shards: <N>` to split it one shard per GPU and merge. `head: <N>` cuts the
+  # peak list down to a slice for a first pass.
+  k562_cbp:
+    model: cbp
+    wo_bias: /path/to/kant/models/k562/chrombpnet_wo_bias.pt
     peaks: config/peaks/k562_allpeaks_33917.bed
-    stride: 8            # positions p % 8 == r masked together; 8 passes per strand
-    source: none         # none = with the alignment; mask = human sequence only
-    head: 2000
-    in_window: 1536
+    n_shards: 4
+    rows: 33917
+  # AlphaGenome declares `ag_src` in its OWN entry -- attr_argv reads r["ag_src"], so
+  # a top-level key of that name would never be read. `track` picks the output head;
+  # `crop` is the central width kept out of `in_window`.
+  k562_ag2048:
+    model: ag
+    ag_src: /path/to/kant/models/alphagenome-pytorch-deeplift/src
+    weights: /path/to/kant/models/alphagenome/weights.pt
+    peaks: config/peaks/k562_allpeaks_33917.bed
+    track: 0
     chunk: 100
+    in_window: 2048
+    crop: 2048
+    head: 2000
 
 # Canonical parameters. Every value here is the tool's own official default
 # (`--help` in envs/chrombpnet_local) unless the note says why it cannot be.
