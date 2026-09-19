@@ -55,14 +55,24 @@ Neither model is a pip package here. The attribution steps put a checkout on
 `sys.path` themselves, so you clone the repository and point config at it.
 
 ```bash
-git clone https://github.com/jsxlei/chrombpnet-pytorch.git         # -> chrombpnet_src
-git clone https://github.com/genomicsxai/alphagenome-pytorch.git   # -> a run's ag_src
+git clone https://github.com/jsxlei/chrombpnet-pytorch.git                  # -> chrombpnet_src
+git clone -b deeplift-support \
+    https://github.com/rastogiruchir/alphagenome-pytorch.git                # -> a run's ag_src
 ```
 
+**The AlphaGenome checkout is the `deeplift-support` branch of Ruchir Rastogi's fork,
+not the port itself.** The DeepLIFT rules the AG path needs — `attribution/deeplift.py`,
+his work, Apache-2.0 — are not merged into `genomicsxai/alphagenome-pytorch`; cloning
+the port gets you a checkout with no `attribution/` module and an AG path that cannot
+run. The `-b deeplift-support` above is what makes the difference.
+
 The runs in this repository used `chrombpnet-pytorch@01ad10b` and
-`alphagenome-pytorch@64e9b75`. `ag_src` is the `src/` directory inside that checkout,
-and it is declared **per run**, not at the top level — `attr_argv` reads
+`rastogiruchir/alphagenome-pytorch@64e9b75`. `ag_src` is the `src/` directory inside
+that checkout, and it is declared **per run**, not at the top level — `attr_argv` reads
 `r["ag_src"]`, so a top-level key of that name is never read by anything.
+
+A branch on a personal fork can be rebased or deleted. If the AG path matters to you,
+fork it yourself and pin your own copy, or wait for the rules to land upstream.
 
 Model weights are yours to supply: a ChromBPNet run needs a bias-corrected checkpoint
 (`wo_bias`), an AlphaGenome run needs `weights`.

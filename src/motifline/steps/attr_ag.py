@@ -22,6 +22,10 @@ bounds) for full-scale runs, and the resumable chunk checkpointing inside each s
 AG runs for tens of hours, so a kill must cost at most one chunk. The two compose:
 shard i writes ``_chunks_<i>/`` and then ``attr_<i>.npy``/``ohe_<i>.npy``/``regions_<i>.bed``.
 
+The AlphaGenome DeepLIFT rules and the dinucleotide-shuffle reference generator are
+Ruchir Rastogi's attribution/deeplift.py (rastogiruchir/alphagenome-pytorch, branch
+deeplift-support, Apache-2.0); --ag_src must point at that checkout's src/.
+
 stdlib + numpy/pandas/torch/pyfaidx + alphagenome-pytorch + chrombpnet only; this file must
 never import motifline. Site paths arrive as --ag_src/--chrombpnet_src, never
 hardcoded. argparse runs before every heavy import so --help works anywhere.

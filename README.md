@@ -63,25 +63,30 @@ Softplus, MaxPool, `nn.Softmax` — which is all **ChromBPNet** needs.
 
 **AlphaGenome** needs six more op types, supplied by `steps/ag_support.py` and passed in
 through tangermeme's `additional_nonlinear_ops=` hook. Three of the rules are not
-tangermeme's at all: they come from alphagenome-pytorch's own
-`attribution/deeplift.py`, as does the reference generator
+tangermeme's at all: they are **Ruchir Rastogi's**, written for the AlphaGenome PyTorch
+port and living in its `attribution/deeplift.py`, as does the reference generator
 (`local_dinucleotide_shuffle`). One of them **overrides** tangermeme's built-in Softmax
 rule rather than adding to it.
 
 | op type | rule | count in the model |
 |---|---|---|
-| `layers.LayerNorm` | `deeplift.layernorm_symmetric_product_rule` (alphagenome-pytorch) | 43 |
+| `layers.LayerNorm` | `deeplift.layernorm_symmetric_product_rule` (Rastogi) | 43 |
 | `layers.QuickGELU` | tangermeme's generic `_nonlinear` | 37 |
-| `layers.BilinearOp` | `deeplift.bilinear_symmetric_product_rule` (alphagenome-pytorch) | 35 |
+| `layers.BilinearOp` | `deeplift.bilinear_symmetric_product_rule` (Rastogi) | 35 |
 | `nn.Softmax` | `deeplift.softmax_log_ratio_product_rule` — **replaces** tangermeme's `_softmax` | 16 |
 | `layers.SoftClip` | tangermeme's generic `_nonlinear` | 12 |
 | `layers.TanhSoftCap` | tangermeme's generic `_nonlinear` | 9 |
 | `layers.Log1p` | tangermeme's generic `_nonlinear` | on the wrapper, not in the model tree |
 
 So tangermeme supplies the SHAP machinery — hook registration, the reference-shuffling
-loop, hypothetical output, batching, convergence deltas — and alphagenome-pytorch
-supplies the model-specific DeepLIFT rules. This pipeline wires the two together and
-does not invent either.
+loop, hypothetical output, batching, convergence deltas — and Ruchir Rastogi's
+`attribution/deeplift.py` supplies the AlphaGenome-specific DeepLIFT rules. This
+pipeline wires the two together and invents neither.
+
+Those rules are **not merged into the AlphaGenome PyTorch port**: they live on the
+`deeplift-support` branch of `rastogiruchir/alphagenome-pytorch` (Apache-2.0), which is
+what a run's `ag_src` must point at. Cloning the port itself gets you a checkout with no
+`attribution/` module and an AG path that cannot run.
 
 **Why the counts are in that table.** `tangermeme._register_hooks` returns silently for
 any module type it has no rule for: an unregistered nonlinearity is not an error and not
@@ -90,7 +95,8 @@ the consequence, and both attribution steps pass `warning_threshold=1e8`, which 
 it. Nothing at runtime would say the table had a hole.
 
 Measured instead, over `AlphaGenome()` built on the meta device at
-alphagenome-pytorch `64e9b75`: 639 modules, 45 distinct types, 209 of them covered.
+`rastogiruchir/alphagenome-pytorch@64e9b75`: 639 modules, 45 distinct types, 209 of
+them covered.
 Everything uncovered is linear or structural — `Linear`, `Conv1d`,
 `StandardizedConv1d`, `Embedding`, `AvgPool1d`, the containers, and two that look like
 exceptions and are not: `RMSBatchNorm` (81) normalizes with *stored* running statistics
@@ -309,7 +315,9 @@ from its own project — this pipeline is not a substitute for any of them.
 | tool | version here | where |
 |---|---|---|
 | ChromBPNet (PyTorch port) | `jsxlei/chrombpnet-pytorch@01ad10b` | github.com/kundajelab/chrombpnet |
-| AlphaGenome (PyTorch port) | `genomicsxai/alphagenome-pytorch@64e9b75` | github.com/google-deepmind/alphagenome |
+| AlphaGenome (the model) | — | github.com/google-deepmind/alphagenome |
+| AlphaGenome PyTorch port | `genomicsxai/alphagenome-pytorch` | github.com/genomicsxai/alphagenome-pytorch |
+| AlphaGenome DeepLIFT rules | `rastogiruchir/alphagenome-pytorch@64e9b75`, branch `deeplift-support` | Ruchir Rastogi — github.com/rastogiruchir/alphagenome-pytorch |
 | tangermeme | 1.0.4 | github.com/jmschrei/tangermeme |
 | modisco-lite | 2.4.0 | github.com/jmschrei/tfmodisco-lite |
 | FiNeMo | 0.30 (`austintwang/finemo_gpu@5c6f521`) | github.com/austintwang/finemo_gpu |
@@ -330,6 +338,10 @@ Published references for the methods:
   doi:10.1093/nar/gkv416
 - Snakemake — Mölder et al. (2021), *F1000Research* 10:33.
   doi:10.12688/f1000research.29032.2
+
+The DeepLIFT rules that make the AlphaGenome path possible are Ruchir Rastogi's
+(`attribution/deeplift.py`, Apache-2.0), on a branch not yet merged into the port —
+cite them from that repository, not from the port and not from DeepMind.
 
 ChromBPNet, AlphaGenome, tangermeme, FiNeMo, HOCOMOCO and JASPAR should be cited from
 their current project pages; take the reference from the source rather than from here.
