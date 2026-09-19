@@ -83,61 +83,6 @@ science, deviating without knowing is the accident.
 checks MoDISco and FiNeMo give it back. It covers the compute environment and everything
 after `attr/`, not attribution itself and not the naming chain.
 
-## What you can ask for
-
-```bash
-motifline run results/<run>/hits/hits.tsv -j 4        # one target
-motifline run -n                                      # dry run
-```
-
-| you want | rule | target |
-|---|---|---|
-| attribute a slice or small run in one process | `attribute` | `results/<run>/attr/attr.npy` |
-| attribute full-scale, one shard per GPU | `attribute_sharded` | `results/<run>/attr_shards/shard_<i>/attr_<i>.npy` |
-| glue shards into one matrix | `merge_shards` | `results/<run>/attr/attr.npy` |
-| use an archived `interpret_*_par_hyp` attribution | `import_attr` | `results/<run>/attr/attr.npy` |
-| discover motifs (MoDISco) | `discover` | `results/<run>/modisco/modisco.h5` |
-| build the reference lexicon (once, ~1h45m) | `lexicon_rsat` → `lexicon_cltagged` | `results/lexicon/union_cltagged.meme` |
-| name a run's patterns | `name_patterns` | `results/<run>/naming/pattern_names.tsv` |
-| prepare regions for FiNeMo | `extract_regions` | `results/<run>/finemo_regions/regions.npz` |
-| call hits against the run's own motifs | `call_hits` | `results/<run>/hits/hits.tsv` |
-
-Every stage also writes a `run_info.json` beside its output once it has succeeded: the
-argv, the parameters it reran on, the environment and the tool versions that environment
-reports, and anything it measured about what it produced. Its presence means the stage
-finished. `docs/ARTIFACTS.md` says what each stage writes.
-
-## Four things that will bite you
-
-**`--rerun-triggers mtime params` is not optional.** With snakemake's default `mtime`
-alone, editing `finemo.threshold` or `modisco.window` leaves every finished stage in place
-and snakemake reports "Nothing to be done", so `results/` ends up holding a mixture of
-parameter generations that nothing on disk distinguishes from a coherent tree.
-`motifline run` bakes it in; driving `snakemake` directly, pass it yourself.
-
-**Attributions are hypothetical, always.** `--hypothetical` decides whether a score is
-stored for every base or only the observed one, and the two arrays are identical in shape,
-dtype and filename — MoDISco consumes either without failing. Both attribution steps
-refuse to run without the flag, and every stage that produces or adopts an attribution
-measures what it actually got and records it.
-
-**The AlphaGenome path needs a specific checkout.** The DeepLIFT rules it needs are Ruchir
-Rastogi's, on the `deeplift-support` branch of `rastogiruchir/alphagenome-pytorch`, and
-they are not merged into the port — cloning the port gives you an AG path that cannot run.
-
-**FiNeMo 0.30 is pinned and 0.41 is not a drop-in.** Note the version next to any hits you
-keep; `run_info.json` records it for you.
-
-## Hit calling and naming are different questions
-
-`call_hits` scores a run's **own** MoDISco patterns against its own regions, so its hits
-are self-contained. The reference lexicon never enters hit calling — it only supplies
-names, and a name is only assigned when the TomTom match passes both arms of the gate
-(`q < gate.qval` **and** `best_ncor >= gate.ncor`). A pattern that fails either arm keeps
-its match in the table marked `annotated=False` and is not renamed. The chain stops at the
-cluster: grouping clusters into families is a human judgement, not derivable from the
-matrices.
-
 ## Layout
 
 ```
@@ -157,12 +102,6 @@ Why each decision is what it is lives next to the code it governs: `naming.py` f
 lexicon and the gate, `tools.py` for the parameter checking, `attribution.py` for the
 hypothetical measurement, `steps/attr_ag.py` and `steps/ag_support.py` for the AlphaGenome
 path.
-
-## GPUs
-
-GPU selection is the caller's: `export CUDA_VISIBLE_DEVICES=<uuid>` (fully-free cards
-only, pinned by UUID — indices shift — and leave one working card free), and bound
-concurrency with `--gpus <G>`. The pipeline never picks a card for you.
 
 ## Citing the tools this pipeline runs
 
