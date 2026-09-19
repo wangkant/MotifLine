@@ -19,21 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-THIRD-PARTY CODE
-
-Parts of `src/motifline/steps/ag_support.py` derive from, and modify, Ruchir Rastogi's
-`examples/notebooks/deeplift.ipynb` (rastogiruchir/alphagenome-pytorch, branch
-`deeplift-support`), Apache License 2.0 -- text at `licenses/Apache-2.0.txt`. The MIT
-terms above do not cover those parts; the file's header says which they are.
-
----
-
-This license covers the motifline pipeline code only. The tools it invokes as
-external processes -- ChromBPNet, AlphaGenome, GPN-Star, tangermeme,
-modisco-lite, FiNeMo, RSAT and the MEME Suite -- are separate works under their
-own licenses, are not redistributed here, and must be obtained and cited from
-their own sources. See the "Citing the tools this pipeline runs" section of
-README.md.
