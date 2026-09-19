@@ -8,6 +8,11 @@ the wrapper is reformatted, the op table became a function of two booleans, and 
 notebook's ``uncached_nonlinear_ops`` is dropped because stock tangermeme 1.0.4 does not
 take it. ``ag_seqs_centered`` and ``load_peaks`` are not his.
 
+The table has to be complete: tangermeme registers no hook for a module type it has
+no rule for and says nothing, so a missing nonlinearity is silently given ordinary
+gradients. Measured over AlphaGenome's 639 modules at 64e9b75, everything left
+uncovered is linear or structural.
+
 They live here rather than being imported from the validation script, because that tree
 is read-only and must never be on motifline's import path: the pipeline has to keep
 working when it is gone, and an import would silently re-bind the pipeline's math to a

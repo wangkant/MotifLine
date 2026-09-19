@@ -1,16 +1,13 @@
 # motifline
 
-A Snakemake pipeline from model attributions to MoDISco motifs to FiNeMo hits, one
-line per run, for **ChromBPNet** and **AlphaGenome** on the same downstream code path.
-Both models are attributed with DeepLIFT/SHAP hypothetical contributions driven by
-`tangermeme.deep_lift_shap`, and everything from `attr/` onwards is byte-for-byte the
-same code for either model. The attribution step itself is not identical, and saying so
-matters — see "What DeepLIFT rules each model needs" below.
+A Snakemake pipeline from model attributions to MoDISco motifs to FiNeMo hits, one line
+per run, for **ChromBPNet** and **AlphaGenome** on the same downstream code path.
 
-No bespoke algorithms. Discovery is modisco-lite 2.4.0, hit calling is FiNeMo 0.30
-(pinned), pattern names come from an RSAT `matrix-clustering` lexicon over HOCOMOCO
-and JASPAR, matched with TomTom. Parameters are the tools' official defaults; the
-deviations are stated, with the reason, where they are set.
+No bespoke algorithms: attribution is DeepLIFT/SHAP through `tangermeme.deep_lift_shap`,
+discovery is modisco-lite 2.4.0, hit calling is FiNeMo 0.30 (pinned), and pattern names
+come from an RSAT `matrix-clustering` lexicon over HOCOMOCO and JASPAR, matched with
+TomTom. Parameters are the tools' own defaults, and `motifline doctor` checks that
+against the installed binaries rather than asserting it here.
 
 ```
 attribute (cbp | ag)  ->  discover  ->  extract_regions  ->  call_hits
@@ -20,12 +17,13 @@ built once:  lexicon_union -> lexicon_rsat -> lexicon_medoid -> lexicon_cltagged
 
 ## Install
 
-Four conda environments, two model source checkouts, three reference files, one
-config — **[docs/INSTALL.md](docs/INSTALL.md)** has the whole of it. The short version:
+Four conda environments, two model source checkouts, three reference files, one config.
+**[docs/INSTALL.md](docs/INSTALL.md)** has all of it, including which checkout the
+AlphaGenome path needs — it is not the one you would guess.
 
 ```bash
 git clone https://github.com/wangkant/motifline.git && cd motifline
-ENVS=$HOME/motifline-envs                  # the recipes are in envs/; the prefixes go elsewhere
+ENVS=$HOME/motifline-envs
 conda env create -p $ENVS/orchestration -f envs/orchestration.yaml
 conda env create -p $ENVS/compute       -f envs/compute.yaml
 conda env create -p $ENVS/meme          -f envs/meme.yaml
@@ -39,130 +37,19 @@ $ENVS/orchestration/bin/pip install -e .
 motifline init            # write config/default.yaml
 $EDITOR config/default.yaml
 motifline check           # every problem in the config at once, before anything runs
-motifline doctor          # one page: tool versions, parameters, model code
+motifline doctor          # tool versions, parameters vs their defaults, model code
 motifline smoke           # does this installation work? ~1 min, CPU, no model needed
 motifline run -j 8 --gpus 2
 ```
 
-`motifline smoke` plants AP-1 (`TGACTCA`) in 180 of 300 synthetic hypothetical
-attributions, runs MoDISco and FiNeMo over them and checks the motif comes back. It
-covers the compute environment and the downstream half of the pipeline; it does not
-cover the attribution steps (they need model weights) or the naming chain (it needs
-the RSAT clustering, which is 1h46m).
-
 `motifline check` reports missing keys, misspelled keys, paths that do not exist and
-peaks files without a summit column — all of them in one pass, rather than failing
-inside whichever stage first reads the key that is wrong. A misspelling is not a
-cosmetic problem here: `n_shard: 4` is a perfectly valid single-process run.
+peaks files without a summit column — all in one pass, rather than failing inside
+whichever stage first reads the key that is wrong. A misspelling is not cosmetic here:
+`n_shard: 4` is a perfectly valid single-process run.
 
-## What DeepLIFT rules each model needs
-
-`tangermeme.deep_lift_shap` does not support AlphaGenome out of the box. It ships a
-nonlinearity table for CNN-shaped models — the ReLU family, GELU, SiLU, Sigmoid, Tanh,
-Softplus, MaxPool, `nn.Softmax` — which is all **ChromBPNet** needs.
-
-**AlphaGenome** needs six more op types, supplied by `steps/ag_support.py` and passed in
-through tangermeme's `additional_nonlinear_ops=` hook. Three of the rules are not
-tangermeme's at all: they are **Ruchir Rastogi's**, written for the AlphaGenome PyTorch
-port and living in its `attribution/deeplift.py`, as does the reference generator
-(`local_dinucleotide_shuffle`). One of them **overrides** tangermeme's built-in Softmax
-rule rather than adding to it.
-
-| op type | rule | count in the model |
-|---|---|---|
-| `layers.LayerNorm` | `deeplift.layernorm_symmetric_product_rule` (Rastogi) | 43 |
-| `layers.QuickGELU` | tangermeme's generic `_nonlinear` | 37 |
-| `layers.BilinearOp` | `deeplift.bilinear_symmetric_product_rule` (Rastogi) | 35 |
-| `nn.Softmax` | `deeplift.softmax_log_ratio_product_rule` — **replaces** tangermeme's `_softmax` | 16 |
-| `layers.SoftClip` | tangermeme's generic `_nonlinear` | 12 |
-| `layers.TanhSoftCap` | tangermeme's generic `_nonlinear` | 9 |
-| `layers.Log1p` | tangermeme's generic `_nonlinear` | on the wrapper, not in the model tree |
-
-So tangermeme supplies the SHAP machinery — hook registration, the reference-shuffling
-loop, hypothetical output, batching, convergence deltas — and Ruchir Rastogi's
-`attribution/deeplift.py` supplies the AlphaGenome-specific DeepLIFT rules. This
-pipeline wires the two together and invents neither.
-
-Those rules are **not merged into the AlphaGenome PyTorch port**: they live on the
-`deeplift-support` branch of `rastogiruchir/alphagenome-pytorch` (Apache-2.0), which is
-what a run's `ag_src` must point at. Cloning the port itself gets you a checkout with no
-`attribution/` module and an AG path that cannot run.
-
-**Why the counts are in that table.** `tangermeme._register_hooks` returns silently for
-any module type it has no rule for: an unregistered nonlinearity is not an error and not
-a warning, it simply gets ordinary gradients. The convergence-delta check would catch
-the consequence, and both attribution steps pass `warning_threshold=1e8`, which disables
-it. Nothing at runtime would say the table had a hole.
-
-Measured instead, over `AlphaGenome()` built on the meta device at
-`rastogiruchir/alphagenome-pytorch@64e9b75`: 639 modules, 45 distinct types, 209 of
-them covered.
-Everything uncovered is linear or structural — `Linear`, `Conv1d`,
-`StandardizedConv1d`, `Embedding`, `AvgPool1d`, the containers, and two that look like
-exceptions and are not: `RMSBatchNorm` (81) normalizes with *stored* running statistics
-(`x * inv + bias`, `inv` never a function of `x`), so it is affine; `Pool1d` (12) is a
-padding wrapper whose `nn.MaxPool1d`/`nn.AvgPool1d` children are hooked individually.
-
-That is a measurement of one model at one commit. An upstream change that introduces a
-new nonlinearity would be silent.
-
-## Is this the official configuration?
-
-That this pipeline runs MoDISco and FiNeMo is not the point — anyone can run those.
-The point is that it runs them at the tools' own defaults, with the handful of
-deviations stated and argued. A claim like that is true on the day it is written and
-unchecked ever after, so here it is measured instead, against the binaries that are
-actually going to run:
-
-```
-$ motifline doctor
-compute env  /…/envs/compute
-  modisco-lite   2.4.0
-  finemo         0.30
-
-parameters
-  every parameter this pipeline sets is on its tool's official default
-
-  config key            -> tool flag
-  modisco.max_seqlets   -> modisco-lite --max_seqlets   [-n is required by the CLI; there is no default to adopt]
-  modisco.window        -> modisco-lite --window
-  finemo.mode           -> finemo --mode
-  finemo.threshold      -> finemo --cwm-trim-threshold   [-t trims the CWM; it is not a hit score threshold]
-  finemo.alpha          -> finemo --global-lambda   [passed as -l. finemo also has a DEPRECATED --alpha, which this is not]
-  finemo.batch          -> finemo --batch-size
-```
-
-Two comparisons, because one is not enough:
-
-- **config against the installed tool.** Both tools print `(default: X)` in `--help`,
-  so the defaults are read off the binary rather than from documentation.
-- **the installed tool against `src/motifline/tool_defaults.yaml`**, which records what
-  each default *was* at the pinned version. Without this second comparison, a tool that
-  moves a default is invisible whenever config moves with it: config would still match
-  the installed tool while no longer being the configuration the published runs used.
-
-Neither blocks. Deviating on purpose is ordinary science; deviating without knowing is
-the accident, and that is what these report. The mapping table is printed because it is
-not guessable: `finemo.threshold` is a CWM trim threshold and not a hit score, and
-`finemo.alpha` reaches `--global-lambda` while finemo *also* has a deprecated `--alpha`
-that means something else.
-
-## Was the attribution hypothetical?
-
-`--hypothetical` decides whether a score is stored for every base at every position or
-only for the base that is there. The two come out as arrays of the same shape, the same
-dtype and the same filename, and MoDISco consumes either without failing. Nothing in a
-run log tells them apart. The array does:
-
-```
-frac = (|attr| > 1e-9).mean()     ~1.00 hypothetical,  ~0.25 projected
-```
-
-Both attribution steps now refuse to run without the flag, and every stage that
-produces or adopts an attribution measures the array it ended up with and records the
-result in its `run_info.json`. An array that does not look hypothetical is reported
-loudly and not deleted — an attribution that cost GPU-days is not thrown away by its
-own label.
+`motifline smoke` plants AP-1 (`TGACTCA`) in 180 of 300 synthetic hypothetical
+attributions and checks MoDISco and FiNeMo give it back. It covers the compute
+environment and the downstream half of the pipeline, not attribution and not naming.
 
 ## Targets
 
@@ -183,6 +70,52 @@ Which rules a run gets is decided by what its config entry contains: `adopt_from
 → out of `rule all` but still resumable by explicit target. `model:` picks the step
 (`cbp`, `ag`).
 
+## Four things that will bite you
+
+**`--rerun-triggers mtime params` is not optional.** With snakemake's default `mtime`
+alone, editing `finemo.threshold` or `modisco.window` leaves every finished stage in
+place and snakemake reports "Nothing to be done", so `results/` ends up holding a
+mixture of parameter generations that nothing on disk distinguishes from a coherent
+tree. `motifline run` bakes it in; driving `snakemake` directly, pass it yourself.
+
+**Attributions are hypothetical, always.** `--hypothetical` decides whether a score is
+stored for every base or only the observed one, and the two arrays are identical in
+shape, dtype and filename — MoDISco consumes either without failing. Both steps refuse
+to run without the flag, and every stage that produces or adopts an attribution measures
+what it got (`frac(|attr| > 1e-9)`: ~1.0 hypothetical, ~0.25 projected) and records it.
+
+**The AlphaGenome path needs a specific checkout.** tangermeme's nonlinearity table
+covers CNN-shaped models, which is all ChromBPNet needs; AlphaGenome needs six more op
+types, and three of those rules are Ruchir Rastogi's, on the `deeplift-support` branch
+of `rastogiruchir/alphagenome-pytorch`. They are not merged into the port, so cloning
+the port gives you an AG path that cannot run. `steps/ag_support.py` has the details.
+
+**FiNeMo 0.30 is pinned and 0.41 is not a drop-in.** Note the version next to any hits
+you keep — `run_info.json` records it for you.
+
+## Is this the official configuration?
+
+`motifline check`, `motifline doctor` and every `motifline run` compare twice: config
+against the defaults the installed tools print in `--help`, and those installed defaults
+against `src/motifline/tool_defaults.yaml`, which records what they were at the pinned
+version. The second comparison catches a tool that moves a default when config moves
+with it. Both report and neither blocks — deviating on purpose is ordinary science,
+deviating without knowing is the accident.
+
+`doctor` also prints the config-key → tool-flag mapping, which is not guessable:
+`finemo.threshold` is `--cwm-trim-threshold` (a CWM trim, not a hit score) and
+`finemo.alpha` is `--global-lambda`, while FiNeMo *also* has a deprecated `--alpha`
+meaning something else. Rationale in `src/motifline/tools.py`.
+
+## What a finished stage records
+
+Every stage writes `run_info.json` next to its output once its body has succeeded: the
+stage, the exact argv, the parameter signature it reran on, the environment prefix and
+the versions that environment reports, host, timestamps, and any checks it measured on
+its own output. Written after success and never before, so its presence means the stage
+finished; nothing reads it back. `docs/ARTIFACTS.md` has the rest of what each stage
+writes.
+
 ## Layout
 
 ```
@@ -193,27 +126,18 @@ config/peaks/         the fixed 33,917-peak K562 set these runs share
 envs/                 environment recipes; envs/locks/ the exact trees we ran
 src/motifline/        cli, config validation, tool-default checking, provenance,
                       adopt, attribution, merge_shards, naming, runs, smoke, stages
-                      (orchestration env)
-  tool_defaults.yaml  what each tool's defaults were at the version pinned here
-src/motifline/steps/  attr_cbp.py, attr_ag.py (+ ag_support.py), lexicon_*.py,
-                      name_patterns.py (+ motif_matrix.py)
-                      -- compute-env scripts; they never import motifline
-docs/INSTALL.md       installing it
-docs/ARTIFACTS.md     what each stage writes
+src/motifline/steps/  compute-env scripts; they never import motifline
+docs/                 INSTALL.md, ARTIFACTS.md
 tests/                the load-bearing claims, runnable without a GPU
 ```
 
 ## Attribution geometry
 
-Each model attributes its own native window and stores all of it: **ChromBPNet
-2114 bp**, **AlphaGenome 2048 bp** (AG's input floor, 16 × 128 bp trunk bins). A run
-may declare `in_window` (and, for AG, `crop`) to override the step's default; the
-adopted AG runs do, because their archived arrays were computed at 16384 bp cropped to
-2114. Every downstream stage reads the width off `attr.npy` itself rather than from a
-config value that would have to be kept equal to what the arrays are.
-
-Motif discovery is robust to windows that differ by tens or hundreds of bp; per-position
-profiles are not.
+Each model attributes its own native window and stores all of it: **ChromBPNet 2114 bp**,
+**AlphaGenome 2048 bp** (AG's input floor, 16 × 128 bp trunk bins). A run may declare
+`in_window` (and, for AG, `crop`) to override the step's default. Every downstream stage
+reads the width off `attr.npy` itself rather than from a config value that would have to
+be kept equal to what the arrays are.
 
 ## Naming patterns
 
@@ -229,29 +153,14 @@ HOCOMOCO H14CORE (1595) + JASPAR CORE vert NR (1019)
    -> TomTom + gate                     -> results/<run>/naming/pattern_names.tsv
 ```
 
-Two decisions are worth stating because both look like details:
+Two decisions in that chain look like details and are not — the TomTom target is the
+cluster-tagged union rather than the medoid library, and the gate has two arms
+(`q < gate.qval` **and** `best_ncor >= gate.ncor`) because q alone passes matches that
+are significant and wrong. Both are argued in `src/motifline/naming.py`.
 
-- **The TomTom target is the cluster-tagged union, not the medoid library.** A
-  pattern's best library match is usually *not* its cluster's medoid, so matching
-  against representatives alone loses the member that actually fits and inflates the
-  q-value of a correct assignment. Matching against the full set and reading the
-  cluster id back off the winner's name costs nothing — the medoid library is built
-  anyway, as the compact reference to plot and publish from.
-- **The gate has two arms**: `q < gate.qval` **and** `best_ncor >= gate.ncor`, where
-  `best_ncor` is measured on the pattern's IC core against the untagged matrices with
-  the same Ncor the clustering was built on, and `gate.ncor` is set to the clustering's
-  own merge floor. q alone passes matches that are significant and wrong — a repeat
-  element whose core contains a TF half-site is the standard case. A pattern failing
-  either arm keeps its match in the table with `annotated=False` and is not renamed.
-
-Nothing here assigns **families**. Grouping cluster ids into site types so that two
-models' patterns can be paired is a human judgement made once per project and is not
-derivable from the matrices. The chain stops at the cluster.
-
-`rule lexicon_rsat` is the expensive step — **1h46m** over 2,614 matrices, measured
-2026-08-25 — and the only one; everything after it is minutes. The build was verified
-against the artifacts it replaced: union, medoid MEME and cluster-tagged union come out
-byte-identical, the Ncor matrix agrees to 1.1e-15.
+The chain stops at the cluster: grouping cluster ids into families is a human judgement
+made once per project and is not derivable from the matrices. `rule lexicon_rsat` is the
+one expensive step, 1h46m over 2,614 matrices.
 
 ## Running
 
@@ -259,58 +168,14 @@ byte-identical, the Ncor matrix agrees to 1.1e-15.
 motifline run [TARGET ...] -j <N> --gpus <G>
 ```
 
-`motifline run` is `snakemake` with `--rerun-triggers mtime params` baked in. That is
-not a convenience. With snakemake's default `mtime` alone, editing `finemo.threshold`
-or `modisco.window` leaves every finished stage in place and snakemake reports
-"Nothing to be done" — `results/` then holds a mixture of parameter generations that
-nothing on disk distinguishes from a coherent tree. Every rule declares a `params:`
-signature of the values it actually runs at, for exactly this trigger. The `code`
-trigger stays off on purpose: the `run:` blocks only assemble argv.
-
-Driving `snakemake` directly still works; pass the triggers yourself.
-
 GPU selection is the caller's: `export CUDA_VISIBLE_DEVICES=<uuid>` (fully-free cards
 only, pinned by UUID — indices shift — and leave one working card free), and bound
 concurrency with `--gpus <G>`.
 
-## What a finished stage records
-
-Every stage writes a `run_info.json` next to its output once its body has succeeded:
-the stage name, the exact argv, the parameter signature it reran on, the environment
-prefix and the versions that environment reports for FiNeMo, modisco-lite, tangermeme,
-torch and numpy, plus host, timestamps, and any `checks` that stage measured on its own
-output — for the attribution stages, the hypothetical fraction above.
-
-It is written after the body succeeds and never before, so a `run_info.json` means the
-stage finished. Nothing in the pipeline reads it back and no stage refuses to run
-because of it — it is a label on the output, not a gate on the input.
-
-## Environments
-
-| env | role |
-|---|---|
-| `envs/orchestration.yaml` (py3.12) | snakemake + this package |
-| `envs/compute.yaml` (py3.10) | attribution and everything downstream: torch, tangermeme, modisco-lite, FiNeMo 0.30 |
-| `envs/rsat.yaml` (rsat-core 2025.04.04) | `matrix-clustering`, invoked through its own `bin/rsat` launcher; `rule lexicon_rsat` only |
-| `envs/meme.yaml` (meme 5.5.9) | `tomtom`, for `name_patterns` |
-
-Step scripts never import this package, and no model code is installed into any
-environment: every site path arrives as an argument, and `attr_cbp.py` / `attr_ag.py`
-put the checkout named by `chrombpnet_src` / a run's `ag_src` on `sys.path` themselves.
-
-## House rules
-
-- Attributions are HYPOTHETICAL (`--hypothetical`), always. Both steps refuse without
-  it, and the array is measured afterwards rather than taken on trust.
-- Hits are produced by FiNeMo 0.30; the version is not interchangeable with 0.41. Note
-  it next to any hits you keep — `run_info.json` records it for you.
-- Peaks fed to FiNeMo must be 10/11-column narrowPeak with the summit in column 10;
-  the attribution steps normalize this themselves and `motifline check` verifies it.
-
 ## Citing the tools this pipeline runs
 
 motifline is orchestration. The science is in the tools below, and each should be cited
-from its own project — this pipeline is not a substitute for any of them.
+from its own project.
 
 | tool | version here | where |
 |---|---|---|
@@ -324,30 +189,21 @@ from its own project — this pipeline is not a substitute for any of them.
 | HOCOMOCO | H14 CORE | hocomoco.autosome.org |
 | JASPAR | CORE vertebrates non-redundant | jaspar.elixir.no |
 
-Published references for the methods:
-
-- DeepLIFT — Shrikumar, Greenside & Kundaje (2017), *Learning important features
-  through propagating activation differences*, ICML. arXiv:1704.02685
-- TF-MoDISco — Shrikumar et al. (2018), *Technical note on Transcription Factor Motif
-  Discovery from Importance Scores*. arXiv:1811.00416
-- RSAT matrix-clustering — Castro-Mondragon et al. (2017), *Nucleic Acids Research*
-  45:e119. doi:10.1093/nar/gkx314
-- TomTom — Gupta, Stamatoyannopoulos, Bailey & Noble (2007), *Genome Biology* 8:R24.
-  doi:10.1186/gb-2007-8-2-r24
-- MEME Suite — Bailey et al. (2015), *Nucleic Acids Research* 43:W39–W49.
-  doi:10.1093/nar/gkv416
-- Snakemake — Mölder et al. (2021), *F1000Research* 10:33.
-  doi:10.12688/f1000research.29032.2
-
 The AG DeepLIFT rules are Ruchir Rastogi's; cite them from his repository rather than
 from the port or from DeepMind.
 
-ChromBPNet, AlphaGenome, tangermeme, FiNeMo, HOCOMOCO and JASPAR should be cited from
-their current project pages; take the reference from the source rather than from here.
+Published references for the methods: DeepLIFT — Shrikumar, Greenside & Kundaje (2017),
+ICML, arXiv:1704.02685 · TF-MoDISco — Shrikumar et al. (2018), arXiv:1811.00416 · RSAT
+matrix-clustering — Castro-Mondragon et al. (2017), *NAR* 45:e119,
+doi:10.1093/nar/gkx314 · TomTom — Gupta et al. (2007), *Genome Biology* 8:R24,
+doi:10.1186/gb-2007-8-2-r24 · MEME Suite — Bailey et al. (2015), *NAR* 43:W39,
+doi:10.1093/nar/gkv416 · Snakemake — Mölder et al. (2021), *F1000Research* 10:33,
+doi:10.12688/f1000research.29032.2
 
 `CITATION.cff` covers this pipeline itself.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). It covers this pipeline's code only; the tools it invokes
-are separate works under their own licenses and are not redistributed here.
+MIT — see [LICENSE](LICENSE), which also names the Apache-2.0 code `steps/ag_support.py`
+derives from. It covers this pipeline's code only; the tools it invokes are separate
+works under their own licenses and are not redistributed here.
