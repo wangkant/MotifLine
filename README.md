@@ -1,19 +1,40 @@
 # motifline
 
-A Snakemake pipeline from model attributions to MoDISco motifs to FiNeMo hits, one line
-per run, for **ChromBPNet** and **AlphaGenome** on the same downstream code path.
-
-No bespoke algorithms: attribution is DeepLIFT/SHAP through `tangermeme.deep_lift_shap`,
-discovery is modisco-lite 2.4.0, hit calling is FiNeMo 0.30 (pinned), and pattern names
-come from an RSAT `matrix-clustering` lexicon over HOCOMOCO and JASPAR, matched with
-TomTom. Parameters are the tools' own defaults, and `motifline doctor` checks that
-against the installed binaries rather than asserting it here.
+Give it a set of peaks and a trained sequence model. It gives you back the motifs that
+model learned, where they occur, and what they are called.
 
 ```
-attribute (cbp | ag)  ->  discover  ->  extract_regions  ->  call_hits
-                                 \->  name_patterns
-built once:  lexicon_union -> lexicon_rsat -> lexicon_medoid -> lexicon_cltagged
+   peaks.bed  +  model weights
+        │
+        ▼
+   attribute  (ChromBPNet | AlphaGenome)      what the model reads at each base
+        │
+        │   attr.npy   ohe.npy   regions.bed
+        │
+        ├────────────────────────────────┐
+        ▼                                ▼
+   discover                         extract_regions
+   MoDISco                          FiNeMo packaging
+        │  modisco.h5                    │  regions.npz
+        │                                │
+        ├────────────────────────────────┴──►  call_hits  ──►  hits.tsv
+        │                                      FiNeMo             where each motif occurs
+        ▼
+   name_patterns  ──►  pattern_names.tsv       what each motif is
+   TomTom + gate
+        ▲
+        │  the reference lexicon, built once and shared by every run:
+        │  HOCOMOCO H14CORE + JASPAR CORE vert NR → RSAT matrix-clustering
+        │  → 821 clusters → one medoid each → the cluster-tagged union
 ```
+
+It is a Snakemake pipeline around the standard tools and contributes no algorithms of
+its own: attributions are DeepLIFT/SHAP through `tangermeme.deep_lift_shap`, discovery is
+modisco-lite 2.4.0, hit calling is FiNeMo 0.30, naming is TomTom against an RSAT-clustered
+lexicon. What it contributes is that the whole line runs end to end from one config file,
+at the tools' own default parameters, with every output labelled by what produced it —
+and that two models, ChromBPNet and AlphaGenome, share the entire path after `attr/`, so
+what differs between two runs is the model rather than the analysis.
 
 ## Install
 
@@ -31,27 +52,43 @@ conda env create -p $ENVS/rsat          -f envs/rsat.yaml
 $ENVS/orchestration/bin/pip install -e .
 ```
 
-## Quick start
+## Using it
 
 ```bash
 motifline init            # write config/default.yaml
 $EDITOR config/default.yaml
 motifline check           # every problem in the config at once, before anything runs
-motifline doctor          # tool versions, parameters vs their defaults, model code
+motifline doctor          # tool versions, parameters vs the tools' own defaults, model code
 motifline smoke           # does this installation work? ~1 min, CPU, no model needed
 motifline run -j 8 --gpus 2
 ```
 
-`motifline check` reports missing keys, misspelled keys, paths that do not exist and
+One run is one entry under `runs:` in the config. What rules it gets follows from what
+the entry contains: `adopt_from` → adopt an archived attribution; `n_shards` → attribute
+in shards, one GPU each, then merge; neither → attribute in one process; `cancelled: true`
+→ out of the default target list but still reachable by explicit target. `model:` picks
+`cbp` or `ag`. `config/example.yaml` has a worked entry of each kind.
+
+**`motifline check`** reports missing keys, misspelled keys, paths that do not exist and
 peaks files without a summit column — all in one pass, rather than failing inside
 whichever stage first reads the key that is wrong. A misspelling is not cosmetic here:
 `n_shard: 4` is a perfectly valid single-process run.
 
-`motifline smoke` plants AP-1 (`TGACTCA`) in 180 of 300 synthetic hypothetical
-attributions and checks MoDISco and FiNeMo give it back. It covers the compute
-environment and the downstream half of the pipeline, not attribution and not naming.
+**`motifline doctor`** reads the defaults the installed tools print in `--help` and says
+where your config differs from them, and where the tools have moved a default since this
+pipeline pinned them. It reports and never blocks; deviating on purpose is ordinary
+science, deviating without knowing is the accident.
 
-## Targets
+**`motifline smoke`** plants AP-1 (`TGACTCA`) in 180 of 300 synthetic attributions and
+checks MoDISco and FiNeMo give it back. It covers the compute environment and everything
+after `attr/`, not attribution itself and not the naming chain.
+
+## What you can ask for
+
+```bash
+motifline run results/<run>/hits/hits.tsv -j 4        # one target
+motifline run -n                                      # dry run
+```
 
 | you want | rule | target |
 |---|---|---|
@@ -63,58 +100,43 @@ environment and the downstream half of the pipeline, not attribution and not nam
 | build the reference lexicon (once, ~1h45m) | `lexicon_rsat` → `lexicon_cltagged` | `results/lexicon/union_cltagged.meme` |
 | name a run's patterns | `name_patterns` | `results/<run>/naming/pattern_names.tsv` |
 | prepare regions for FiNeMo | `extract_regions` | `results/<run>/finemo_regions/regions.npz` |
-| call hits against the run's own lexicon | `call_hits` | `results/<run>/hits/hits.tsv` |
+| call hits against the run's own motifs | `call_hits` | `results/<run>/hits/hits.tsv` |
 
-Which rules a run gets is decided by what its config entry contains: `adopt_from`
-→ adopted; `n_shards` → sharded + merge; neither → single-process; `cancelled: true`
-→ out of `rule all` but still resumable by explicit target. `model:` picks the step
-(`cbp`, `ag`).
+Every stage also writes a `run_info.json` beside its output once it has succeeded: the
+argv, the parameters it reran on, the environment and the tool versions that environment
+reports, and anything it measured about what it produced. Its presence means the stage
+finished. `docs/ARTIFACTS.md` says what each stage writes.
 
 ## Four things that will bite you
 
 **`--rerun-triggers mtime params` is not optional.** With snakemake's default `mtime`
-alone, editing `finemo.threshold` or `modisco.window` leaves every finished stage in
-place and snakemake reports "Nothing to be done", so `results/` ends up holding a
-mixture of parameter generations that nothing on disk distinguishes from a coherent
-tree. `motifline run` bakes it in; driving `snakemake` directly, pass it yourself.
+alone, editing `finemo.threshold` or `modisco.window` leaves every finished stage in place
+and snakemake reports "Nothing to be done", so `results/` ends up holding a mixture of
+parameter generations that nothing on disk distinguishes from a coherent tree.
+`motifline run` bakes it in; driving `snakemake` directly, pass it yourself.
 
 **Attributions are hypothetical, always.** `--hypothetical` decides whether a score is
-stored for every base or only the observed one, and the two arrays are identical in
-shape, dtype and filename — MoDISco consumes either without failing. Both steps refuse
-to run without the flag, and every stage that produces or adopts an attribution measures
-what it got (`frac(|attr| > 1e-9)`: ~1.0 hypothetical, ~0.25 projected) and records it.
+stored for every base or only the observed one, and the two arrays are identical in shape,
+dtype and filename — MoDISco consumes either without failing. Both attribution steps
+refuse to run without the flag, and every stage that produces or adopts an attribution
+measures what it actually got and records it.
 
-**The AlphaGenome path needs a specific checkout.** tangermeme's nonlinearity table
-covers CNN-shaped models, which is all ChromBPNet needs; AlphaGenome needs six more op
-types, and three of those rules are Ruchir Rastogi's, on the `deeplift-support` branch
-of `rastogiruchir/alphagenome-pytorch`. They are not merged into the port, so cloning
-the port gives you an AG path that cannot run. `steps/ag_support.py` has the details.
+**The AlphaGenome path needs a specific checkout.** The DeepLIFT rules it needs are Ruchir
+Rastogi's, on the `deeplift-support` branch of `rastogiruchir/alphagenome-pytorch`, and
+they are not merged into the port — cloning the port gives you an AG path that cannot run.
 
-**FiNeMo 0.30 is pinned and 0.41 is not a drop-in.** Note the version next to any hits
-you keep — `run_info.json` records it for you.
+**FiNeMo 0.30 is pinned and 0.41 is not a drop-in.** Note the version next to any hits you
+keep; `run_info.json` records it for you.
 
-## Is this the official configuration?
+## Hit calling and naming are different questions
 
-`motifline check`, `motifline doctor` and every `motifline run` compare twice: config
-against the defaults the installed tools print in `--help`, and those installed defaults
-against `src/motifline/tool_defaults.yaml`, which records what they were at the pinned
-version. The second comparison catches a tool that moves a default when config moves
-with it. Both report and neither blocks — deviating on purpose is ordinary science,
-deviating without knowing is the accident.
-
-`doctor` also prints the config-key → tool-flag mapping, which is not guessable:
-`finemo.threshold` is `--cwm-trim-threshold` (a CWM trim, not a hit score) and
-`finemo.alpha` is `--global-lambda`, while FiNeMo *also* has a deprecated `--alpha`
-meaning something else. Rationale in `src/motifline/tools.py`.
-
-## What a finished stage records
-
-Every stage writes `run_info.json` next to its output once its body has succeeded: the
-stage, the exact argv, the parameter signature it reran on, the environment prefix and
-the versions that environment reports, host, timestamps, and any checks it measured on
-its own output. Written after success and never before, so its presence means the stage
-finished; nothing reads it back. `docs/ARTIFACTS.md` has the rest of what each stage
-writes.
+`call_hits` scores a run's **own** MoDISco patterns against its own regions, so its hits
+are self-contained. The reference lexicon never enters hit calling — it only supplies
+names, and a name is only assigned when the TomTom match passes both arms of the gate
+(`q < gate.qval` **and** `best_ncor >= gate.ncor`). A pattern that fails either arm keeps
+its match in the table marked `annotated=False` and is not renamed. The chain stops at the
+cluster: grouping clusters into families is a human judgement, not derivable from the
+matrices.
 
 ## Layout
 
@@ -131,46 +153,16 @@ docs/                 INSTALL.md, ARTIFACTS.md
 tests/                the load-bearing claims, runnable without a GPU
 ```
 
-## Attribution geometry
+Why each decision is what it is lives next to the code it governs: `naming.py` for the
+lexicon and the gate, `tools.py` for the parameter checking, `attribution.py` for the
+hypothetical measurement, `steps/attr_ag.py` and `steps/ag_support.py` for the AlphaGenome
+path.
 
-Each model attributes its own native window and stores all of it: **ChromBPNet 2114 bp**,
-**AlphaGenome 2048 bp** (AG's input floor, 16 × 128 bp trunk bins). A run may declare
-`in_window` (and, for AG, `crop`) to override the step's default. Every downstream stage
-reads the width off `attr.npy` itself rather than from a config value that would have to
-be kept equal to what the arrays are.
-
-## Naming patterns
-
-A MoDISco pattern arrives as `pos_patterns.pattern_3`. Naming it is a separate chain
-with its own library, built once and shared by every run:
-
-```
-HOCOMOCO H14CORE (1595) + JASPAR CORE vert NR (1019)
-   -> lexicon_sources_union.meme (2614, every matrix kept, "E= 0" added)
-   -> RSAT matrix-clustering            -> 821 clusters
-   -> lexicon_rsat.meme                 -> one MEDOID per cluster (never an average)
-   -> union_cltagged.meme               -> the union, names prefixed with cluster ids
-   -> TomTom + gate                     -> results/<run>/naming/pattern_names.tsv
-```
-
-Two decisions in that chain look like details and are not — the TomTom target is the
-cluster-tagged union rather than the medoid library, and the gate has two arms
-(`q < gate.qval` **and** `best_ncor >= gate.ncor`) because q alone passes matches that
-are significant and wrong. Both are argued in `src/motifline/naming.py`.
-
-The chain stops at the cluster: grouping cluster ids into families is a human judgement
-made once per project and is not derivable from the matrices. `rule lexicon_rsat` is the
-one expensive step, 1h46m over 2,614 matrices.
-
-## Running
-
-```bash
-motifline run [TARGET ...] -j <N> --gpus <G>
-```
+## GPUs
 
 GPU selection is the caller's: `export CUDA_VISIBLE_DEVICES=<uuid>` (fully-free cards
 only, pinned by UUID — indices shift — and leave one working card free), and bound
-concurrency with `--gpus <G>`.
+concurrency with `--gpus <G>`. The pipeline never picks a card for you.
 
 ## Citing the tools this pipeline runs
 
@@ -189,21 +181,20 @@ from its own project.
 | HOCOMOCO | H14 CORE | hocomoco.autosome.org |
 | JASPAR | CORE vertebrates non-redundant | jaspar.elixir.no |
 
-The AG DeepLIFT rules are Ruchir Rastogi's; cite them from his repository rather than
-from the port or from DeepMind.
+The AG DeepLIFT rules are Ruchir Rastogi's; cite them from his repository rather than from
+the port or from DeepMind.
 
 Published references for the methods: DeepLIFT — Shrikumar, Greenside & Kundaje (2017),
 ICML, arXiv:1704.02685 · TF-MoDISco — Shrikumar et al. (2018), arXiv:1811.00416 · RSAT
-matrix-clustering — Castro-Mondragon et al. (2017), *NAR* 45:e119,
-doi:10.1093/nar/gkx314 · TomTom — Gupta et al. (2007), *Genome Biology* 8:R24,
-doi:10.1186/gb-2007-8-2-r24 · MEME Suite — Bailey et al. (2015), *NAR* 43:W39,
-doi:10.1093/nar/gkv416 · Snakemake — Mölder et al. (2021), *F1000Research* 10:33,
-doi:10.12688/f1000research.29032.2
+matrix-clustering — Castro-Mondragon et al. (2017), *NAR* 45:e119, doi:10.1093/nar/gkx314
+· TomTom — Gupta et al. (2007), *Genome Biology* 8:R24, doi:10.1186/gb-2007-8-2-r24 ·
+MEME Suite — Bailey et al. (2015), *NAR* 43:W39, doi:10.1093/nar/gkv416 · Snakemake —
+Mölder et al. (2021), *F1000Research* 10:33, doi:10.12688/f1000research.29032.2
 
 `CITATION.cff` covers this pipeline itself.
 
 ## License
 
 MIT — see [LICENSE](LICENSE), which also names the Apache-2.0 code `steps/ag_support.py`
-derives from. It covers this pipeline's code only; the tools it invokes are separate
-works under their own licenses and are not redistributed here.
+derives from. It covers this pipeline's code only; the tools it invokes are separate works
+under their own licenses and are not redistributed here.
