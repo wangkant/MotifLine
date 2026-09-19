@@ -134,6 +134,4 @@ Mölder et al. (2021), *F1000Research* 10:33, doi:10.12688/f1000research.29032.2
 
 ## License
 
-MIT — see [LICENSE](LICENSE). One file, `steps/ag_support.py`, is partly derived from
-Apache-2.0 code; [NOTICE](NOTICE) says which and whose. The tools this pipeline invokes are
-separate works under their own licenses and are not redistributed here.
+MIT — see [LICENSE](LICENSE).
