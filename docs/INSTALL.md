@@ -93,29 +93,10 @@ Peaks must be 10- or 11-column narrowPeak with the summit offset in column 10:
 `finemo extract-regions-modisco-fmt -p` names the first ten columns positionally and
 reads the summit from there. `motifline check` verifies this.
 
-### The peak set that ships with this repository
-
-`config/peaks/k562_allpeaks_33917.bed` is the fixed K562 peak set the runs in this
-repository share. Measured off the file:
-
-| | |
-|---|---|
-| rows | 33,917, no duplicates, 11-column narrowPeak |
-| chromosomes | 15 — chr1 2 3 5 6 7 10 11 14 15 16 17 18 19 X |
-| absent | chr4 8 9 12 13 20 21 22 Y |
-| per chromosome | very uneven: chr17 7,612, chr16 4,724, chr10 4,914 … chr14 60, chr2 425 |
-| interval width | 150 – 3,437 bp, median 772 |
-| summit (col 10) | offset 49 – 3,153, inside the interval on every row |
-| column 11 | `True` throughout |
-| build | consistent with hg38: no interval runs past a chromosome end in `hg38.chrom.sizes`, no chromosome missing from it |
-
-**Despite the filename it is not "all peaks".** It covers 15 chromosomes, and the counts
-are far from proportional to chromosome length, so it is a selected subset. **Which
-caller produced it and how the subset was chosen is not recorded in this repository** —
-the archive that produced it is gone. Treat it as the fixed region set these particular
-runs were computed on, not as a general-purpose K562 peak list.
-
-For your own data, supply your own narrowPeak and point a run's `peaks:` at it.
+A 33,917-peak K562 set ships at `config/peaks/k562_allpeaks_33917.bed` — the fixed
+region set the runs in this repository share. It covers 15 chromosomes and is a selected
+subset rather than a complete peak list, so for your own data supply your own narrowPeak
+and point a run's `peaks:` at it.
 
 ## 5. The config
 
