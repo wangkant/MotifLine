@@ -339,9 +339,8 @@ Published references for the methods:
 - Snakemake — Mölder et al. (2021), *F1000Research* 10:33.
   doi:10.12688/f1000research.29032.2
 
-The DeepLIFT rules that make the AlphaGenome path possible are Ruchir Rastogi's
-(`attribution/deeplift.py`, Apache-2.0), on a branch not yet merged into the port —
-cite them from that repository, not from the port and not from DeepMind.
+The AG DeepLIFT rules are Ruchir Rastogi's; cite them from his repository rather than
+from the port or from DeepMind.
 
 ChromBPNet, AlphaGenome, tangermeme, FiNeMo, HOCOMOCO and JASPAR should be cited from
 their current project pages; take the reference from the source rather than from here.

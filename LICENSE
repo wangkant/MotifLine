@@ -24,12 +24,10 @@ SOFTWARE.
 
 THIRD-PARTY CODE
 
-`src/motifline/steps/ag_support.py` is partly derived from, and modifies, the example
-notebook `examples/notebooks/deeplift.ipynb` on branch `deeplift-support` of
-https://github.com/rastogiruchir/alphagenome-pytorch, by Ruchir Rastogi, licensed
-under the Apache License 2.0. A copy of that licence is at `licenses/Apache-2.0.txt`,
-and the file's own header states which parts derive from it and how they were changed.
-The MIT terms above do not apply to those parts.
+Parts of `src/motifline/steps/ag_support.py` derive from, and modify, Ruchir Rastogi's
+`examples/notebooks/deeplift.ipynb` (rastogiruchir/alphagenome-pytorch, branch
+`deeplift-support`), Apache License 2.0 -- text at `licenses/Apache-2.0.txt`. The MIT
+terms above do not cover those parts; the file's header says which they are.
 
 ---
 

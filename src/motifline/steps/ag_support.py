@@ -1,32 +1,12 @@
 #!/usr/bin/env python
 """AlphaGenome DeepLIFT support symbols.
 
-PARTLY DERIVED FROM THIRD-PARTY CODE, AND MODIFIED.
-
-    Source:   examples/notebooks/deeplift.ipynb, branch deeplift-support of
-              https://github.com/rastogiruchir/alphagenome-pytorch
-    Author:   Ruchir Rastogi
-    Licence:  Apache License 2.0 -- full text at licenses/Apache-2.0.txt
-
-``AlphaGenomeWrapper`` is his design, reformatted: the scalar readout (transpose to
-channels-last, organism tensor, heads/resolutions call, pick the track, crop the central
-target_length, sum, log1p) is the notebook's, with the names shortened and the type
-annotations dropped. ``_ag_nonlinear_ops`` is his table -- the same seven op types and
-the same two symmetric/log-ratio conditionals -- lifted out of the notebook's
-``run_deeplift_on_alphagenome``, where it is an inline ``additional_nonlinear_ops``
-dict, and given a name.
-
-MODIFICATIONS to his code, as Apache-2.0 section 4(b) requires them to be stated:
-  * the notebook's ``uncached_nonlinear_ops={layers.QuickGELU}`` is dropped -- it is a
-    memory optimisation that exists only in a tangermeme fork, and this pipeline runs
-    stock tangermeme 1.0.4, which does not take the argument;
-  * the op table became a function of two booleans instead of an inline dict;
-  * the wrapper was reformatted and its annotations removed.
-
-``ag_seqs_centered`` and ``load_peaks`` are NOT his and share no code with the notebook:
-the first centres on ``start + summit`` rather than on the interval midpoint so that the
-AG and ChromBPNet windows align on the same summit, and the second reads narrowPeak and
-drops rows whose window runs off the chromosome.
+``AlphaGenomeWrapper`` and ``_ag_nonlinear_ops`` derive from, and modify, Ruchir
+Rastogi's ``examples/notebooks/deeplift.ipynb`` (rastogiruchir/alphagenome-pytorch,
+branch deeplift-support), Apache-2.0; licence text at licenses/Apache-2.0.txt. Changed:
+the wrapper is reformatted, the op table became a function of two booleans, and the
+notebook's ``uncached_nonlinear_ops`` is dropped because stock tangermeme 1.0.4 does not
+take it. ``ag_seqs_centered`` and ``load_peaks`` are not his.
 
 They live here rather than being imported from the validation script, because that tree
 is read-only and must never be on motifline's import path: the pipeline has to keep
