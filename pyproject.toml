@@ -9,7 +9,7 @@ description = "Attribution -> MoDISco -> FiNeMo, one line per run, for ChromBPNe
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "licenses/Apache-2.0.txt"]
 authors = [{ name = "Kant Wang" }]
 keywords = ["genomics", "regulatory", "motifs", "chrombpnet", "modisco", "snakemake"]
 classifiers = [

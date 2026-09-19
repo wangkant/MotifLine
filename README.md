@@ -189,7 +189,8 @@ Which rules a run gets is decided by what its config entry contains: `adopt_from
 Snakefile             the DAG
 config/default.yaml   runs + shared parameters + site paths (yours; not in git)
 config/example.yaml   a worked config with an entry of each kind
-config/peaks/         a 33,917-peak K562 list in the 11-column narrowPeak form
+config/peaks/         the fixed 33,917-peak K562 set these runs share (15 chromosomes,
+                      a selected subset, not all peaks -- see docs/INSTALL.md)
 envs/                 environment recipes; envs/locks/ the exact trees we ran
 src/motifline/        cli, config validation, tool-default checking, provenance,
                       adopt, attribution, merge_shards, naming, runs, smoke, stages

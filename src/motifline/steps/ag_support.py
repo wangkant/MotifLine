@@ -1,13 +1,37 @@
 #!/usr/bin/env python
-"""AlphaGenome DeepLIFT support symbols, copied VERBATIM from the validated source.
+"""AlphaGenome DeepLIFT support symbols.
 
-Source: <site archive>/new_experiment/region_v3/k562/ag_cbp_deeplift_validation/
-        run_validation.py  (copied 2026-08-14)
-Copied symbols: AlphaGenomeWrapper, _ag_nonlinear_ops, ag_seqs_centered, load_peaks.
+PARTLY DERIVED FROM THIRD-PARTY CODE, AND MODIFIED.
 
-They are copied rather than imported because the archived tree is read-only and must never be
-on motifline's import path: the pipeline has to keep working when that tree is gone, and an
-import would silently re-bind the pipeline's math to a file nobody is versioning.
+    Source:   examples/notebooks/deeplift.ipynb, branch deeplift-support of
+              https://github.com/rastogiruchir/alphagenome-pytorch
+    Author:   Ruchir Rastogi
+    Licence:  Apache License 2.0 -- full text at licenses/Apache-2.0.txt
+
+``AlphaGenomeWrapper`` is his design, reformatted: the scalar readout (transpose to
+channels-last, organism tensor, heads/resolutions call, pick the track, crop the central
+target_length, sum, log1p) is the notebook's, with the names shortened and the type
+annotations dropped. ``_ag_nonlinear_ops`` is his table -- the same seven op types and
+the same two symmetric/log-ratio conditionals -- lifted out of the notebook's
+``run_deeplift_on_alphagenome``, where it is an inline ``additional_nonlinear_ops``
+dict, and given a name.
+
+MODIFICATIONS to his code, as Apache-2.0 section 4(b) requires them to be stated:
+  * the notebook's ``uncached_nonlinear_ops={layers.QuickGELU}`` is dropped -- it is a
+    memory optimisation that exists only in a tangermeme fork, and this pipeline runs
+    stock tangermeme 1.0.4, which does not take the argument;
+  * the op table became a function of two booleans instead of an inline dict;
+  * the wrapper was reformatted and its annotations removed.
+
+``ag_seqs_centered`` and ``load_peaks`` are NOT his and share no code with the notebook:
+the first centres on ``start + summit`` rather than on the interval midpoint so that the
+AG and ChromBPNet windows align on the same summit, and the second reads narrowPeak and
+drops rows whose window runs off the chromosome.
+
+They live here rather than being imported from the validation script, because that tree
+is read-only and must never be on motifline's import path: the pipeline has to keep
+working when it is gone, and an import would silently re-bind the pipeline's math to a
+file nobody is versioning.
 
 This module is part of the COMPUTE layer (chrombpnet_local, py3.10): it must never import
 motifline. It also does no sys.path manipulation of its own -- the caller
