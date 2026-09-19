@@ -11,3 +11,5 @@ git clone -b deeplift-support https://github.com/rastogiruchir/alphagenome-pytor
 $EDITOR config/config.yaml
 envs/orchestration/bin/snakemake -j 8 --resources gpu=4
 ```
+
+`envs/locks/` holds the full package lists of the environments the runs used.
