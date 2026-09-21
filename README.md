@@ -1,112 +1,193 @@
 # motifline
 
-Give it a set of peaks and a trained sequence model. It gives you back the motifs that
-model learned, where they occur, and what they are called.
+**A reproducible Snakemake workflow for regulatory motif discovery, hit calling,
+and annotation from ChromBPNet and AlphaGenome attributions.**
 
+Starting from genomic peaks and a trained sequence model, motifline computes
+sequence attributions, discovers recurring motifs, identifies their occurrences,
+and assigns reference-based annotations. A single configuration file connects
+these stages, with a shared downstream workflow for both supported models.
+
+[Installation](docs/INSTALL.md) · [Example configuration](config/example.yaml) ·
+[Output reference](docs/ARTIFACTS.md)
+
+## What it does
+
+- **Discover motifs:** compute DeepLIFT/SHAP attributions with tangermeme and
+  identify recurring patterns with TF-MoDISco through modisco-lite.
+- **Locate motif occurrences:** use FiNeMo to call motif hits across the analyzed regions.
+- **Annotate patterns:** match motifs with TomTom against an RSAT-clustered
+  HOCOMOCO and JASPAR reference lexicon, with significance and similarity gates.
+- **Keep analyses traceable:** record stage commands, parameters, environments,
+  and tool versions in `run_info.json`; track parameter changes for reruns.
+- **Support different run modes:** compute new attributions in one process or
+  across GPU shards, or reuse archived attributions for downstream analysis.
+
+motifline integrates established methods; it does not introduce a new motif
+analysis algorithm. Its contribution is a consistent, configurable workflow from
+attribution to annotated motif hits. ChromBPNet and AlphaGenome share every stage
+after `attr/`, making the downstream analysis consistent across models. Model
+windows and retained regions can still differ; see the [output reference](docs/ARTIFACTS.md).
+
+## Workflow
+
+```text
+Genomic peaks + model weights + reference genome
+                     |
+                     v
+       Attribute: ChromBPNet or AlphaGenome
+            tangermeme DeepLIFT/SHAP
+                     |
+          attr.npy / ohe.npy / regions.bed
+                     |
+             +-------+--------------------+
+             |                            |
+             v                            v
+     Discover: TF-MoDISco          Package regions: FiNeMo
+         modisco.h5                    regions.npz
+             |                            |
+             +-------------+--------------+
+             |             |
+             |             v
+             |     Call motif hits: FiNeMo
+             |          hits.tsv
+             v
+     Annotate: TomTom + annotation gates
+         pattern_names.tsv
+             ^
+             |
+     Shared reference lexicon
+     HOCOMOCO H14 CORE + JASPAR CORE vertebrates NR
+     -> RSAT clustering -> medoids + cluster-tagged union
 ```
-   peaks.bed  +  model weights
-        │
-        ▼
-   attribute  (ChromBPNet | AlphaGenome)      what the model reads at each base
-        │
-        │   attr.npy   ohe.npy   regions.bed
-        │
-        ├────────────────────────────────┐
-        ▼                                ▼
-   discover                         extract_regions
-   MoDISco                          FiNeMo packaging
-        │  modisco.h5                    │  regions.npz
-        │                                │
-        ├────────────────────────────────┴──►  call_hits  ──►  hits.tsv
-        │                                      FiNeMo             where each motif occurs
-        ▼
-   name_patterns  ──►  pattern_names.tsv       what each motif is
-   TomTom + gate
-        ▲
-        │  the reference lexicon, built once and shared by every run:
-        │  HOCOMOCO H14CORE + JASPAR CORE vert NR → RSAT matrix-clustering
-        │  → 821 clusters → one medoid each → the cluster-tagged union
-```
 
-It is a Snakemake pipeline around the standard tools and contributes no algorithms of
-its own: attributions are DeepLIFT/SHAP through `tangermeme.deep_lift_shap`, discovery is
-modisco-lite 2.4.0, hit calling is FiNeMo 0.30, naming is TomTom against an RSAT-clustered
-lexicon. What it contributes is that the whole line runs end to end from one config file,
-at the tools' own default parameters, with every output labelled by what produced it —
-and that two models, ChromBPNet and AlphaGenome, share the entire path after `attr/`, so
-what differs between two runs is the model rather than the analysis.
+The reference lexicon is built once and shared across runs. The reference set
+used in this repository yields 821 clusters, each represented by one medoid;
+TomTom matches against the cluster-tagged union of reference motifs.
 
-## Install
+## Installation
 
-Four conda environments, two model source checkouts, three reference files, one config.
-**[docs/INSTALL.md](docs/INSTALL.md)** has all of it, including which checkout the
-AlphaGenome path needs — it is not the one you would guess.
+Setup uses four conda environments, model source checkouts, model weights, and
+reference data. Follow the [installation guide](docs/INSTALL.md) for the complete
+setup, including CUDA requirements and reference file formats.
 
 ```bash
-git clone https://github.com/wangkant/motifline.git && cd motifline
+git clone https://github.com/wangkant/motifline.git
+cd motifline
+
 ENVS=$HOME/motifline-envs
-conda env create -p $ENVS/orchestration -f envs/orchestration.yaml
-conda env create -p $ENVS/compute       -f envs/compute.yaml
-conda env create -p $ENVS/meme          -f envs/meme.yaml
-conda env create -p $ENVS/rsat          -f envs/rsat.yaml
-$ENVS/orchestration/bin/pip install -e .
+conda env create -p "$ENVS/orchestration" -f envs/orchestration.yaml
+conda env create -p "$ENVS/compute"       -f envs/compute.yaml
+conda env create -p "$ENVS/meme"          -f envs/meme.yaml
+conda env create -p "$ENVS/rsat"          -f envs/rsat.yaml
+"$ENVS/orchestration/bin/pip" install -e .
+conda activate "$ENVS/orchestration"
 ```
 
-## Using it
+**AlphaGenome requires the `deeplift-support` branch of Ruchir Rastogi's
+`alphagenome-pytorch` fork.** The attribution rules used here are not included in
+the base PyTorch port described in the installation guide. Set `ag_src` to that
+checkout's `src/` directory **inside each AlphaGenome run entry**.
+
+For computed runs, provide a reference genome and a 10- or 11-column narrowPeak
+file with summit offsets in column 10, plus the model checkpoint. The repository
+includes a selected 33,917-peak K562 set for the example analyses.
+
+## Quick start
+
+After completing the installation and reference setup, run these commands from
+the repository directory with the orchestration environment active:
 
 ```bash
-motifline init            # write config/default.yaml
-$EDITOR config/default.yaml
-motifline check           # every problem in the config at once, before anything runs
-motifline doctor          # tool versions, parameters vs the tools' own defaults, model code
-motifline smoke           # does this installation work? ~1 min, CPU, no model needed
-motifline run -j 8 --gpus 2
+motifline init                 # create config/default.yaml
+$EDITOR config/default.yaml    # set paths, model weights, and runs
+motifline check                # validate configuration and input paths
+motifline doctor               # inspect versions, defaults, and model imports
+motifline smoke                # check motif discovery and hit calling on CPU
+motifline run -n               # preview the workflow
+motifline run -j 8 --gpus 2     # execute with up to 8 jobs and 2 GPU resources
 ```
 
-One run is one entry under `runs:` in the config. What rules it gets follows from what
-the entry contains: `adopt_from` → adopt an archived attribution; `n_shards` → attribute
-in shards, one GPU each, then merge; neither → attribute in one process; `cancelled: true`
-→ out of the default target list but still reachable by explicit target. `model:` picks
-`cbp` or `ag`. `config/example.yaml` has a worked entry of each kind.
+Choose available devices with `CUDA_VISIBLE_DEVICES`; `--gpus` limits GPU
+concurrency. You can also request a specific output:
 
-**`motifline check`** reports missing keys, misspelled keys, paths that do not exist and
-peaks files without a summit column — all in one pass, rather than failing inside
-whichever stage first reads the key that is wrong. A misspelling is not cosmetic here:
-`n_shard: 4` is a perfectly valid single-process run.
-
-**`motifline doctor`** reads the defaults the installed tools print in `--help` and says
-where your config differs from them, and where the tools have moved a default since this
-pipeline pinned them. It reports and never blocks; deviating on purpose is ordinary
-science, deviating without knowing is the accident.
-
-**`motifline smoke`** plants AP-1 (`TGACTCA`) in 180 of 300 synthetic attributions and
-checks MoDISco and FiNeMo give it back. It covers the compute environment and everything
-after `attr/`, not attribution itself and not the naming chain.
-
-## Layout
-
-```
-Snakefile             the DAG
-config/default.yaml   runs + shared parameters + site paths (yours; not in git)
-config/example.yaml   a worked config with an entry of each kind
-config/peaks/         the fixed 33,917-peak K562 set these runs share
-envs/                 environment recipes; envs/locks/ the exact trees we ran
-src/motifline/        cli, config validation, tool-default checking, provenance,
-                      adopt, attribution, merge_shards, naming, runs, smoke, stages
-src/motifline/steps/  compute-env scripts; they never import motifline
-docs/                 INSTALL.md, ARTIFACTS.md
-tests/                the load-bearing claims, runnable without a GPU
+```bash
+motifline run results/<run>/hits/hits.tsv -j 4
 ```
 
-Why each decision is what it is lives next to the code it governs: `naming.py` for the
-lexicon and the gate, `tools.py` for the parameter checking, `attribution.py` for the
-hypothetical measurement, `steps/attr_ag.py` and `steps/ag_support.py` for the AlphaGenome
-path.
+### Configure runs
 
-## Citing the tools this pipeline runs
+Each entry under `runs:` defines one analysis. The
+[example configuration](config/example.yaml) includes computed, sharded, adopted,
+and cancelled runs, along with shared parameters and reference settings.
 
-motifline is orchestration. The science is in the tools below, and each should be cited
-from its own project.
+| Setting | Behavior |
+|---|---|
+| `model: cbp` or `model: ag` | Select ChromBPNet or AlphaGenome. |
+| `adopt_from` | Reuse archived attributions and run downstream stages. |
+| `n_shards` | Split attribution into GPU shards, then merge the results. |
+| Neither `adopt_from` nor `n_shards` | Compute attributions in one process. |
+| `cancelled: true` | Exclude the run from default targets; explicit targets remain available. |
+
+The configuration follows upstream tool defaults where applicable and documents
+explicit choices where required. `motifline doctor` reports deviations from
+installed defaults and changes relative to the pinned defaults, so intentional
+parameter choices remain visible.
+
+### Validate the setup
+
+| Command | What it checks |
+|---|---|
+| `motifline check` | Missing or misspelled keys, missing paths, and peak files without the required summit column, reported together. |
+| `motifline doctor` | Configuration, installed tool versions and defaults, parameter deviations, and model imports. Parameter deviations alone do not block a run. |
+| `motifline smoke` | Recovery of an AP-1 motif planted in 180 of 300 synthetic attributions using MoDISco and FiNeMo. Runs on CPU in about a minute without model weights. |
+
+The smoke test covers motif discovery and hit calling. It does **not** validate
+model attribution or the reference naming chain.
+
+## Outputs
+
+Results are organized by run under `results/<run>/`. Key files include:
+
+| File | Contents |
+|---|---|
+| `attr.npy` | Hypothetical contribution scores for each analyzed sequence. |
+| `ohe.npy` | One-hot encoded sequences aligned to the attributions. |
+| `regions.bed` | Regions corresponding to the attribution rows. |
+| `modisco.h5` | Discovered motif patterns. |
+| `regions.npz` | Region data packaged for FiNeMo. |
+| `hits.tsv` | Called motif occurrences. |
+| `pattern_names.tsv` | Reference-based pattern annotations. |
+| `run_info.json` | Per-stage execution metadata and provenance. |
+
+Use `regions.bed` as the row key for downstream analysis: filtering during
+attribution means the retained rows may differ from the original peak file.
+See [docs/ARTIFACTS.md](docs/ARTIFACTS.md) for stage directories, array shapes,
+checkpoint behavior, and model-specific details.
+
+## Repository layout
+
+```text
+Snakefile             Snakemake workflow
+config/default.yaml   Local configuration generated by motifline init (not tracked)
+config/example.yaml   Example runs and shared settings
+config/peaks/         Selected K562 peak set used by the example analyses
+envs/                 Environment recipes and exact package locks
+src/motifline/        CLI, validation, attribution, naming, and orchestration
+src/motifline/steps/  Scripts executed in the compute environment
+docs/                 Installation and output documentation
+tests/                Tests runnable without a GPU
+```
+
+Implementation rationale lives alongside the relevant code: `naming.py` covers
+the reference lexicon and annotation gates, `tools.py` covers parameter checks,
+`attribution.py` covers hypothetical attribution measurements, and
+`steps/attr_ag.py` / `steps/ag_support.py` cover AlphaGenome attribution.
+
+## Citation and attribution
+
+If you use motifline, cite the pipeline using [CITATION.cff](CITATION.cff) and
+the underlying tools and methods relevant to your analysis.
 
 | tool | version here | where |
 |---|---|---|
