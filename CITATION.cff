@@ -8,7 +8,7 @@ abstract: >-
 type: software
 authors:
   - family-names: Wang
-    given-names: Kant
+    given-names: Qiankang
     alias: wangkant
 repository-code: "https://github.com/wangkant/motifline"
 license: MIT
