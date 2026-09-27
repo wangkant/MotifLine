@@ -1,23 +1,12 @@
-"""Was this attribution hypothetical? Ask the array, not the log.
+"""Was this attribution hypothetical? Ask the array.
 
-``--hypothetical`` decides whether a score is stored for every base at every position
-or only for the base that is actually there. The two come out as arrays of the same
-shape, the same dtype and the same filename, and every stage downstream will consume
-either without complaint: MoDISco is documented to take hypothetical attributions,
-and giving it projected ones changes what it finds without failing.
-
-Nothing in a run log distinguishes them. The array does:
+Hypothetical and projected attributions have the same shape, dtype and filename, and
+every stage downstream consumes either. The array tells them apart:
 
     frac = (|attr| > 1e-9).mean()      ~1.00 hypothetical,  ~0.25 projected
 
-``attr_ag.py`` refuses to run without the flag and ``attr_cbp.py`` now does too, so
-this measurement should never disagree with what was asked for. It is recorded anyway,
-in every attribution stage's ``run_info.json``, because the whole point is that the
-flag's effect was previously unobservable after the fact.
-
-It reports; it does not raise. An attribution that cost GPU-days is not deleted by its
-own label, and a measurement that could fail a finished run would eventually be
-switched off.
+Both attribution steps refuse to run without ``--hypothetical``; this records the
+measurement in ``run_info.json`` and warns, never raises.
 """
 from __future__ import annotations
 

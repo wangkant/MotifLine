@@ -6,9 +6,8 @@ and does a motif that is definitely in the input come back out. It needs no geno
 model weights and no GPU -- the attributions are synthetic, so the only thing under test
 is the downstream half of the pipeline and the environment it runs in.
 
-What it does NOT cover, and must not be read as covering: the attribution steps
-themselves (they need real model weights) and the naming chain (it needs the RSAT
-clustering, which is an hour and three quarters).
+It does not cover the attribution steps (they need real model weights) or naming
+(it needs TomTom and the source libraries).
 """
 from __future__ import annotations
 

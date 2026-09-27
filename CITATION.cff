@@ -4,7 +4,7 @@ title: motifline
 abstract: >-
   A Snakemake pipeline from model attributions to MoDISco motifs to FiNeMo hits,
   one line per run, for ChromBPNet and AlphaGenome on the same downstream code
-  path, with pattern names assigned from an RSAT-clustered HOCOMOCO/JASPAR lexicon.
+  path, with pattern names assigned by TomTom against the HOCOMOCO/JASPAR union.
 type: software
 authors:
   - family-names: Wang

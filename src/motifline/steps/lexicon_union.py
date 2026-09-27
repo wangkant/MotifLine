@@ -1,28 +1,21 @@
 #!/usr/bin/env python
-"""Concatenate the reference source libraries into ONE union MEME file.
+"""Concatenate the reference source libraries into ONE union MEME file, TomTom's target.
 
 Two edits, nothing else -- every matrix value is copied through verbatim:
 
 * ``MOTIF MA0004.1 Arnt`` -> ``MOTIF MA0004.1_Arnt``. JASPAR puts the gene symbol in a
-  third column; RSAT and TomTom both key on a single id, and the two-token form would
-  make the id ambiguous against HOCOMOCO's single-token names.
-* ``letter-probability matrix: ...`` gains ``E= 0`` when it does not already carry an
-  ``E=`` field. RSAT's ``_readFromMEMEFile_2015`` regex requires it; HOCOMOCO's export
-  omits it, and without this the whole HOCOMOCO half is dropped **silently** -- the
-  clustering then runs on the JASPAR half alone and looks like it worked.
-
-The union is what TomTom matches against (via the cluster-tagged copy) and what RSAT
-clusters. Matching against the full set rather than a de-duplicated representative
-library is the point: most patterns' best library match is not their cluster's medoid,
-so collapsing first costs sensitivity.
+  third column; TomTom keys on a single id, and the two-token form would make the id
+  ambiguous against HOCOMOCO's single-token names.
+* ``letter-probability matrix: ...`` gains ``E= 0`` when it has no ``E=`` field. TomTom
+  ignores it; it is kept so the union stays byte-identical to the one the existing
+  names were made from.
 """
 import argparse
 import re
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from motif_matrix import MEME_HEADER  # noqa: E402
+MEME_HEADER = ("MEME version 4\n\nALPHABET= ACGT\n\nstrands: + -\n\n"
+               "Background letter frequencies\nA 0.25 C 0.25 G 0.25 T 0.25\n\n")
 
 
 def blocks(path):

@@ -1,20 +1,8 @@
-"""Launching a stage body, and labelling the directory it finished in.
+"""Run one stage body, then label the directory it finished in (``run_info.json``).
 
-Every rule in the Snakefile does the same three things: make the stage directory, run
-one subprocess in it, and -- once that subprocess has succeeded -- write the
-``run_info.json`` that says what produced the files. Keeping it here rather than in the
-Snakefile is what makes those three things testable.
-
-The label is written **after** the body succeeds and never before. A ``run_info.json``
-next to a half-written array would be worse than no label at all: it would say a stage
-finished that did not.
-
-``checks`` are measurements taken on the finished output and written into the label --
-the attribution stages use them to record whether the array they produced is actually
-hypothetical. A check never decides whether the stage succeeded: one that raises is
-recorded as having raised, because a measurement able to fail a finished run would
-eventually be switched off, and an attribution that cost GPU-days is not deleted by
-its own label. A check that wants attention returns a ``warning``, which is printed.
+The label is written only after the body succeeded. ``checks`` are measurements on the
+finished output recorded in the label; they never fail the stage, and one that returns
+a ``warning`` gets it printed.
 """
 from __future__ import annotations
 

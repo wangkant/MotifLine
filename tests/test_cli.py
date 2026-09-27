@@ -75,14 +75,6 @@ def test_check_reports_a_config_file_that_is_not_there(tmp_path, capsys):
     assert "nope.yaml" in capsys.readouterr().err
 
 
-# --- run -------------------------------------------------------------------
-
-def test_run_always_passes_the_params_rerun_trigger(tmp_path):
-    argv = snakemake_argv([], snakefile=tmp_path / "Snakefile")
-    i = argv.index("--rerun-triggers")
-    assert argv[i + 1:i + 3] == ["mtime", "params"]
-
-
 def test_run_invokes_snakemake_in_the_interpreter_running_the_cli(tmp_path):
     argv = snakemake_argv([], snakefile=tmp_path / "Snakefile")
     assert argv[:3] == [sys.executable, "-m", "snakemake"]
@@ -161,27 +153,3 @@ def test_a_deviating_parameter_is_reported_but_does_not_fail_the_check(tmp_path,
     assert main(["check", "-c", str(cfg), "--no-paths"]) == 0
     out = capsys.readouterr().out
     assert "modisco.window" in out and "500" in out and "400" in out
-
-
-@has_compute
-def test_doctor_reports_the_tool_versions_the_compute_env_actually_has(tmp_path, capsys):
-    cfg = write_cfg(tmp_path, real_env_cfg())
-    main(["doctor", "-c", str(cfg)])
-    out = capsys.readouterr().out
-    assert "finemo" in out and "0.30" in out
-
-
-@has_compute
-def test_doctor_fails_on_a_broken_config_not_on_a_deviation(tmp_path, capsys):
-    ok = write_cfg(tmp_path, real_env_cfg(modisco_window=500), name="ok.yaml")
-    assert main(["doctor", "-c", str(ok), "--no-paths"]) == 0
-    broken = real_env_cfg()
-    del broken["genome"]
-    bad = write_cfg(tmp_path, broken, name="bad.yaml")
-    assert main(["doctor", "-c", str(bad), "--no-paths"]) != 0
-
-
-def test_doctor_without_a_readable_compute_env_says_so_instead_of_crashing(tmp_path, capsys):
-    cfg = write_cfg(tmp_path)          # envs.compute is /e/compute, which is not there
-    main(["doctor", "-c", str(cfg), "--no-paths"])
-    assert "could not" in capsys.readouterr().out.lower()

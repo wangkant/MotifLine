@@ -5,11 +5,7 @@ below. A stage that crashed part way through can leave partial output whose
 names are the same as a finished run's, so treat a directory as finished only
 after its target reruns clean.
 
-Shapes and dtypes below were read off `results/k562_cbp_full` and
-`results/k562_ag_adopted` (2026-08-14), not from the code that intends them. Those two
-directories no longer exist; the surviving runs are listed in `config/default.yaml`.
-
-Every stage directory also carries a **`run_info.json`** (since 2026-09-19),
+Every stage directory also carries a **`run_info.json`**,
 written after the body succeeded and never before: `stage`, the exact `argv`, the
 `param_sig` the rule reruns on, the `env` prefix and the `tools` versions that
 environment reports, plus `host` and `started`/`finished`. Nothing reads it back
@@ -20,11 +16,6 @@ Stages that produce or adopt an attribution (`attribute`, `attribute_sharded`,
 wrote: `hypothetical_fraction` = `frac(|attr| > 1e-9)` over the first 64 rows,
 `looks_hypothetical` = whether that is ≥ 0.99, and a `warning` when it is not.
 ~1.0 is hypothetical, ~0.25 is projected; the two are otherwise identical on disk.
-
-Stage directories produced before 2026-08-14 also carry `params.json`,
-`provenance.json`, `run_status.json` and `guard_outcomes.json`. Those are
-historical records of the audit layer this pipeline used to run; the pipeline no
-longer writes or reads them.
 
 ---
 
@@ -37,10 +28,9 @@ longer writes or reads them.
 | `regions.bed` | `N` lines, 11 tab-separated columns |
 
 `W` is whatever width the step stored, and every downstream stage reads it off
-`attr.npy` (the Snakefile's `attr_width`; `geometry.py` was removed 2026-09-07). The
+`attr.npy` (the Snakefile's `attr_width`). The
 steps' own defaults: **CBP 2114, AG 2048** — each model attributes its
-native window and stores all of it. Runs that declare the older AG geometry (16384bp
-window, central crop to 2114) keep it, because that is what their archived arrays are.
+native window and stores all of it.
 Sharded runs write `attr_<i>.npy` / `ohe_<i>.npy` /
 `regions_<i>.bed` — the index is in the filename so `merge_shards` can check
 that shard *i* really is the *i*-th directory it was given.
@@ -59,16 +49,11 @@ handle ambiguous bases differently: CBP additionally drops any row containing an
 `N → A` and keeps the row, so that the AG region set stays equal to CBP's. This is
 why `regions.bed` — not `peaks.bed` — is the row key for everything downstream.
 
-That fill used to be free: at the 16384 → 2114 geometry the N's were in flanks the
-step cropped away. At the native 2048 geometry there is no flank, so a filled base
-is a base MoDISco reads as an `A` that is not one. The step therefore writes
+A filled base is a base MoDISco reads as an `A` that is not one, so the step writes
 `n_filled.tsv` (`chr, start, summit, n_filled_window, n_filled_kept`) listing the
-regions whose fill landed inside the kept window — **empty file = no such region**,
-and since 2026-08-25 that is true: the record is written per chunk
-(`_chunks_<i>/n_filled_<c>.tsv`) and concatenated at the end, so it covers the whole
-run including the chunks a resumed process skipped. Before that it was accumulated in
-memory and rewritten from whatever the last process happened to compute, so resuming
-silently replaced the record with a shorter one.
+regions whose fill landed inside the kept window — **empty file = no such region**.
+It is written per chunk (`_chunks_<i>/n_filled_<c>.tsv`) and concatenated at the end,
+so it covers chunks a resumed process skipped.
 
 ### AG chunk checkpoints — `_chunks_<i>/`
 
@@ -80,10 +65,8 @@ holding only chunks is a run in progress, not a result.
 
 `chunk_identity.json` records the arguments that decide what a chunk *contains*
 (weights, peaks, track, head, in_window, crop, n_shuffles, random_state, chunk,
-shard index). Resuming onto checkpoints computed under different values is **refused**:
-the resume test was previously the chunk index alone, so changing a run's `track` or
-`n_shuffles` and re-running produced an `attr.npy` concatenated from two parameter
-generations, silently.
+shard index). Resuming onto checkpoints computed under different values is refused,
+so one `attr.npy` cannot mix two parameter generations.
 
 ## `import_attr` → `attr/`
 
@@ -132,26 +115,11 @@ extent by trimming its CWM at `-t`, so two runs whose CWMs differ slightly emit
 the same hits at coordinates shifted by a base or two — compare hit sets with a
 ±2bp tolerance in mind, not by exact coordinates.
 
-## `lexicon_*` → `results/lexicon/`
-
-The reference lexicon, built once and shared by every run's naming stage (2026-08-25).
-Verified against the artifacts it replaces: `lexicon_sources_union.meme`,
-`lexicon_rsat.meme` and `union_cltagged.meme` are byte-identical to the
-hand-built originals, `ncor.npy` agrees to 1.1e-15.
+## `lexicon_union` → `results/lexicon/`
 
 | file | contents |
 |---|---|
 | `lexicon_sources_union.meme` | the source libraries concatenated, every matrix kept; JASPAR ids joined (`MA0004.1_Arnt`), `E= 0` added where absent |
-| `rsat/` | RSAT `matrix-clustering`'s full output tree; only `rsat/rsat_tables/clusters.tab` is consumed, the rest is that file's provenance |
-| `clusters_rsat.tsv` | flat `cluster, motif, source, is_medoid` |
-| `lexicon_rsat.meme` | one **medoid** PPM per cluster (never an average) |
-| `lexicon_rsat.metadata.tsv` | per cluster: `lexicon_id`, `size`, `medoid`, `width`, per-source counts, `min_ncor`, `tf_symbols`, `members` |
-| `union_cltagged.meme` | the union with `{lexicon_id}__` prefixed onto each name — the TomTom target until 2026-09-27; naming now matches against `lexicon_sources_union.meme` |
-| `ncor.npy` | `(M, M) float64` all-pairs Ncor over the union, in source order. Evidence, **not a cache**: it is the similarity every cluster was judged on and nothing else on disk records it, but no stage reads it back |
-
-`E= 0` is not cosmetic: RSAT's MEME reader requires the field and drops records
-without it **silently**, so a union missing it clusters one library and looks
-like it worked.
 
 ## `name_patterns` → `<run>/naming/`
 
@@ -159,13 +127,17 @@ like it worked.
 |---|---|
 | `<label>_query.meme` | the patterns as queried: PPM cut to modiscolite's `|CWM|` 30%-of-max span |
 | `tomtom_<label>/` | TomTom's own output (`-mi 1` deliberately absent — against a batch query it would score only the first pattern) |
-| `pattern_names.tsv` | one row per pattern: `label, key, group, pattern, n_seqlets, trim_*`, `match0..2`/`tf0..2`/`pval0..2`/`qval0..2`/`overlap0..2`, `name`, plus the provenance the names depend on — `target`, `target_sha256` |
+| `pattern_names.tsv` | one row per pattern: `label, key, group, pattern, n_seqlets, trim_*`, `match0..2`/`tf0..2`/`pval0..2`/`qval0..2`/`overlap0..2`, `name`, plus the provenance the names depend on — `target`, `target_sha256`, `h14_annotation_sha256` |
 | `tomtom_<label>/target.sha256` | digest of the library that produced that TomTom run. The run is reused only when the digest matches AND the TSV ends with TomTom's closing comment block; a rebuilt lexicon or a truncated file forces a re-run instead of being silently accepted |
 
-`name` is `tf0`, the TF symbol of the first TomTom match against the source
-union (`lexicon_sources_union.meme`), for every pattern whatever its q-value
-(user, 2026-09-27). There is no gate, no RSAT cluster, no Ncor measurement and
-no family; `qval0` is reported beside the name and nothing is decided on it.
+`name` is `tf0`, the gene symbol of the first TomTom match against the source
+union (`lexicon_sources_union.meme`), for every pattern whatever its q-value.
+`match0..2` keep the library ids. A HOCOMOCO id's prefix is the UniProt entry name
+(`TYY1` for YY1), so `tf` for a HOCOMOCO match is read from
+`reference_lexicon.h14_annotation` (HOCOMOCO's `H14CORE_annotation.jsonl`, HUMAN
+`gene_symbol`); an id missing from it stops the stage. A JASPAR `tf` is the symbol
+after `_`, upper-cased (`MA2503.1_Banp` → `BANP`).
+`qval0` is reported beside the name and nothing is decided on it.
 
 ## `merge_shards` → `attr/`
 
@@ -177,7 +149,3 @@ that each shard's attr/ohe/regions agree on row count, and the rule passes
 `--expected_rows` so a merge over an unfinished shard is a hard error rather
 than a short matrix that still looks valid.
 
-(The `equivalence_*` comparison rules were removed on 2026-08-15 with the audit
-layer; the cross-model merge, the external-lexicon routes and the finemo 0.41 arm on
-2026-09-07. `results/merges/`, `hits_lexicon_*/` and `hits_v041/` directories, where
-they survive, are historical.)

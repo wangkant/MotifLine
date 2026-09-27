@@ -3,11 +3,7 @@
 The archived ``interpret_{cbp,ag}_par_hyp/`` products cost GPU-days and the old
 tree is read-only, so adoption links rather than copies: ``attr.npy`` and
 ``ohe.npy`` become absolute symlinks and only the normalized ``regions.bed`` is
-newly written. Nothing is written until every shape check passes, so a refused
-adoption leaves an empty stage directory rather than a half-linked one.
-
-Nothing is written until every shape check passes; a check that fails raises
-``ValueError`` and the stage directory is left as it was.
+newly written. Nothing is written until every shape check passes.
 
 ``normalize_peaks`` exists because the two archived peak formats disagree: the
 ChromBPNet side stores the 11-column ``load_region_df`` output while the AG side
@@ -99,11 +95,7 @@ def adopt_attr(src_dir, out_dir, expected_rows: int, expected_width: int | None 
         raise ValueError(f"width drift: attr={sa[-1]} ohe={so[-1]} expected={expected_width}")
 
     out.mkdir(parents=True, exist_ok=True)
-    # Normalise the bed FIRST. It is the step that can still refuse (a ragged bed, an
-    # unsupported column count), and doing it after the symlinks left attr.npy and
-    # ohe.npy linked with no regions.bed beside them -- a half-adopted directory the
-    # docstring promises cannot exist. Inside the DAG snakemake cleans up after a failed
-    # job; the documented direct CLI has no such backstop.
+    # Parse the bed before linking anything: it is the step that can still refuse.
     bed_text = normalize_peaks_text(peaks_src)
     for name, target in ((attr_name, attr_src), (ohe_name, ohe_src)):
         link = out / name
@@ -121,7 +113,7 @@ def main():
     ap.add_argument("--out_dir", required=True)
     ap.add_argument("--expected_rows", type=int, required=True)
     ap.add_argument("--expected_width", type=int, default=None,
-                    help="optional; the array's own width is the width (geometry.py removed 2026-09-07)")
+                    help="optional; refuse an array of any other width")
     ap.add_argument("--peaks_name", default="peaks.bed")
     a = ap.parse_args()
     info = adopt_attr(a.src_dir, a.out_dir, a.expected_rows, a.expected_width, a.peaks_name)

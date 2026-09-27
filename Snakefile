@@ -1,14 +1,7 @@
 # Snakefile -- one line per run:
 #
 #     attribute (cbp | ag)  ->  discover  ->  extract_regions  ->  call_hits
-#                                            \->  name_patterns  (reads lexicon_union)
-#     built once:  lexicon_union -> lexicon_rsat -> lexicon_medoid -> lexicon_cltagged
-#                  (the last three are no longer read by naming, 2026-09-27)
-#
-# The cross-model merge (motiflex / MotifCompendium), the external-lexicon routes and
-# the finemo 0.30-vs-0.41 arm were removed on 2026-09-07 (branch `linear`); git history
-# before that commit has them. `geometry.py` went with them: an attribution's width is
-# read off the array (attr_width below), not derived from config.
+#                                        \->  name_patterns  (TomTom vs lexicon_union)
 import json
 import os
 import sys
@@ -21,7 +14,7 @@ configfile: "config/default.yaml"
 from motifline import naming as nm
 from motifline.attribution import hyp_check
 from motifline.config import check as check_config
-from motifline.runs import active_runs, cancelled_runs
+from motifline.runs import active_runs
 from motifline.stages import run_body as _run_body
 
 # Structure only: the DAG has to build on a machine where the archives have moved.
@@ -36,22 +29,14 @@ def rundef(w):
     return config["runs"][w.run]
 
 def param_sig(**kv):
-    """A stable rendering of the scientific parameters a stage runs at.
-
-    Declared as ``params:`` so that ``--rerun-triggers mtime params`` invalidates a
-    stage when a value it uses changes in config. Without it, editing
-    ``finemo.threshold``, ``modisco.window`` or a run's ``track`` left every existing
-    output in place and snakemake reported "Nothing to be done" -- results/ could then
-    hold a mixture of parameter generations indistinguishable from a coherent tree.
-    The value is never read by a stage body; only its identity matters.
-    """
+    """The scientific parameters a stage runs at, declared as ``params:`` so that
+    snakemake reruns the stage when one of them changes in config."""
     return json.dumps(kv, sort_keys=True, default=str)
 
 
 def sig_import_attr(w):
-    # `width` is the run's declared width, kept in the signature so that finished
-    # adopted runs are not re-imported (and their hours of MoDISco re-run) just because
-    # geometry.py went away; nothing reads it.
+    # `width` is only here so the signature of the finished adopted runs stays what it
+    # was; nothing reads it.
     r = rundef(w)
     return param_sig(src=r["adopt_from"], rows=r["rows"],
                      width=int(r.get("crop", r.get("in_window"))),
@@ -59,40 +44,35 @@ def sig_import_attr(w):
 
 
 def sig_naming(w=None):
-    return param_sig(target=nm.UNION, tomtom=nm.params(config)["tomtom"])
+    lex = nm.params(config)
+    return param_sig(target=nm.UNION, tomtom=lex["tomtom"],
+                     h14_annotation=lex["h14_annotation"])
 
 
 def run_body(out_dir, argv, stage, env=None, prefix=None, sig=None, packages=None,
              checks=()):
-    """Run a stage body and, once it succeeds, label the directory it wrote.
-
-    Thin wrapper over motifline.stages.run_body so that every rule states the same
-    three things: which stage this is, which env ran it, and the parameter signature
-    it reran on. ``prefix`` defaults to the compute env, which is what all but the
-    orchestration rules use.
-    """
+    """motifline.stages.run_body; ``prefix`` defaults to the compute env."""
     kw = {} if packages is None else {"packages": packages}
     return _run_body(out_dir, argv, stage=stage, param_sig=sig, env=env,
                      env_prefix=ENV if prefix is None else prefix, checks=checks, **kw)
 
-# One shard per GPU with 8 threads was the measured optimum for AG (run_ag_par_hyp.sh:14-16);
-# without a cap the process oversubscribes the node's cores.
-# NUMBA_NUM_THREADS is in the list because MoDISco's hot loops are numba, not BLAS:
-# without it numba takes all 80 cores per process and four concurrent discover jobs
-# drive the load average past 200.
-COMPUTE_THREADS = {k: "8" for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
-                                    "NUMEXPR_NUM_THREADS", "TORCH_NUM_THREADS",
-                                    "NUMBA_NUM_THREADS")}
+def thread_env(n):
+    """Cap every threading runtime a stage body uses. NUMBA is in the list because
+    MoDISco's hot loops are numba: uncapped, each discover job takes all 80 cores."""
+    return {k: str(n) for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                                "NUMEXPR_NUM_THREADS", "TORCH_NUM_THREADS",
+                                "NUMBA_NUM_THREADS")}
+
+
+# Attribution: one shard per GPU at 8 threads was the measured optimum for AG.
+ATTR_THREADS = thread_env(8)
+# MoDISco (rule discover; the name is kept because it is in that rule's code).
+COMPUTE_THREADS = thread_env(8)
 
 
 def attr_width(run):
-    """Width of a run's saved attributions, read off the array itself.
-
-    Replaces geometry.py (2026-09-07): the width used to be a config-derived number
-    that had to be kept equal to what the arrays actually were. Reading it from
-    attr.npy cannot drift. It exists only once the attr stage does, so it is called
-    inside rule bodies, never in ``input:``/``params:``.
-    """
+    """Width of a run's saved attributions, read off attr.npy. It exists only once the
+    attr stage does, so it is called inside rule bodies, never in ``input:``/``params:``."""
     return int(np.load(f"results/{run}/attr/attr.npy", mmap_mode="r").shape[-1])
 
 
@@ -140,24 +120,15 @@ def attr_argv(r, out, shard_i=None):
 ORCH_PY = sys.executable  # the python running snakemake == the motifline orchestration env
 ORCH_PREFIX = sys.prefix
 
-# GPU selection is the caller's: export CUDA_VISIBLE_DEVICES=<uuid> before running,
-# and bound concurrency with --resources gpu=<G>. House rules stay the same --
-# fully-free cards only, pin by UUID (indices shift), leave one working card free.
+# GPU selection is the caller's: pin the card by UUID in the environment and bound
+# concurrency with --resources gpu=<G>.
 
-# An adopted run links an archived attr/ohe pair in instead of computing one; the two
-# producers write the same three files, so the run names are partitioned between them
-# rather than left to snakemake to disambiguate.
+# Three producers write attr/{attr,ohe}.npy + regions.bed: adopt an archive, attribute
+# in shards and merge, or attribute in one process. Run names are partitioned between them.
 ADOPTED = sorted(k for k, v in config["runs"].items() if v.get("adopt_from"))
 COMPUTED = sorted(k for k, v in config["runs"].items() if not v.get("adopt_from"))
-# ... and computed runs are split again: a full-scale run attributes in shards
-# (one GPU each) and merges, a slice run attributes in one process.
 SHARDED = sorted(k for k in COMPUTED if config["runs"][k].get("n_shards"))
 SINGLE = sorted(k for k in COMPUTED if not config["runs"][k].get("n_shards"))
-# A cancelled run keeps every rule it always had -- it stays resumable by explicit
-# target -- but drops out of the default target list, so a bare `snakemake` cannot
-# restart work somebody stopped on purpose (or re-import an archive that is gone).
-# See src/motifline/runs.py and the run's own CANCELLED.md (config: cancelled_note).
-CANCELLED = cancelled_runs(config)
 
 
 def _alt(names):
@@ -176,7 +147,6 @@ rule all:
     input:
         expand("results/{run}/hits/hits.tsv",
                run=active_runs(config, sorted(config["runs"]))),
-        # every run's patterns named from the one reference lexicon (2026-08-25)
         expand("results/{run}/naming/pattern_names.tsv",
                run=active_runs(config, sorted(config["runs"])))
 
@@ -203,7 +173,7 @@ rule attribute:
     run:
         r = rundef(wildcards)
         out = f"results/{wildcards.run}/attr"
-        run_body(out, attr_argv(r, out), "attribute", env=COMPUTE_THREADS,
+        run_body(out, attr_argv(r, out), "attribute", env=ATTR_THREADS,
                  sig=params.sig, checks=(hyp_check(),))
 
 rule attribute_sharded:
@@ -219,7 +189,7 @@ rule attribute_sharded:
         i = int(wildcards.i)
         out = f"results/{wildcards.run}/attr_shards/shard_{i}"
         run_body(out, attr_argv(r, out, shard_i=i), "attribute_sharded",
-                 env=COMPUTE_THREADS, sig=params.sig, checks=(hyp_check(f"attr_{i}.npy"),))
+                 env=ATTR_THREADS, sig=params.sig, checks=(hyp_check(f"attr_{i}.npy"),))
 
 rule merge_shards:
     """Concatenate the shards in shard order into the one attr/ohe/regions triple
@@ -286,16 +256,8 @@ rule call_hits:
                 "-b", str(f["batch"])]
         run_body(out, argv, "call_hits", sig=params.sig)
 
-# ---------------------------------------------------------------------------
-# Reference lexicon and pattern naming (2026-08-25). One library, built once, for
-# every run in this pipeline; rationale in src/motifline/naming.py.
-# The RSAT clustering is the expensive step -- 1h46m on 2614 matrices, measured
-# 2026-08-25 -- and it is the only one; everything downstream is minutes and is cached
-# by snakemake as usual.
-# ---------------------------------------------------------------------------
-
 rule lexicon_union:
-    """Source libraries -> one union MEME, matrices untouched (E= 0 added for RSAT)."""
+    """Source libraries -> one union MEME, matrices untouched; built once, shared by every run."""
     input: lambda w: nm.source_paths(config)
     output: nm.UNION
     params: sig=param_sig(sources=list(nm.params(config)["sources"]))
@@ -304,72 +266,17 @@ rule lexicon_union:
                 "--out", output[0]]
         run_body(Path(output[0]).parent, argv, "lexicon_union", sig=params.sig)
 
-rule lexicon_rsat:
-    """RSAT matrix-clustering over the union: THE partition, computed by RSAT itself.
-
-    The thresholds are passed explicitly (naming.rsat_argv explains why) and are the
-    web server's documented defaults; standalone leaves them empty, which is not the
-    same clustering. Only rsat_tables/clusters.tab is consumed downstream -- the rest
-    of RSAT's output tree is kept where it lands, as the provenance for that file.
-    """
-    input: nm.UNION
-    output: nm.CLUSTERS_TAB
-    params: sig=param_sig(argv=nm.rsat_argv(config, "<union>", "<out>"))
-    run:
-        out = nm.RSAT_DIR
-        os.makedirs(out, exist_ok=True)
-        rsat_bin = Path(nm.rsat(config)["bin"]).parent
-        # RSAT is not a python env worth probing; the launcher is in argv instead.
-        run_body(out, nm.rsat_argv(config, input[0], f"{out}/rsat"), "lexicon_rsat",
-                 env={"PATH": f"{rsat_bin}:{os.environ['PATH']}"},
-                 prefix=str(Path(nm.rsat(config)["bin"]).parent.parent),
-                 packages=(), sig=params.sig)
-        # The launcher cannot report failure (see naming.rsat_argv), and snakemake only
-        # checks that clusters.tab exists -- which it would, left over from a previous
-        # run at different thresholds. Check the partition covers the union it was given.
-        n_union = sum(1 for l in open(input[0]) if l.startswith("MOTIF "))
-        n_clustered = sum(len(l.rstrip("\n").split("\t")[1].split(","))
-                          for l in open(output[0]))
-        if n_clustered != n_union:
-            raise ValueError(
-                f"RSAT clustered {n_clustered} of {n_union} union motifs; the launcher "
-                f"exits 0 whatever happens, so this is the only place a failed or stale "
-                f"clustering is caught. See {out}/rsat_log.txt.")
-
-rule lexicon_medoid:
-    """One medoid per RSAT cluster -> the compact reference library (+ the Ncor cache)."""
-    input: tab=nm.CLUSTERS_TAB, sources=lambda w: nm.source_paths(config)
-    output: nm.MEDOID_MEME, nm.METADATA, nm.CLUSTERS, nm.NCOR
-    params: sig=param_sig(w_th=nm.w_th(config), sources=list(nm.params(config)["sources"]))  # noqa: E501
-    run:
-        argv = [PY, str(STEPS / "lexicon_medoid.py"), "--clusters_tab", input.tab,
-                *nm.source_argv(config), "--w_th", str(nm.w_th(config)),
-                "--out_dir", nm.LEXICON_DIR]
-        run_body(nm.LEXICON_DIR, argv, "lexicon_medoid", env=COMPUTE_THREADS,
-                 sig=params.sig)
-
-rule lexicon_cltagged:
-    """The union with cluster ids prefixed onto the names: the TomTom target."""
-    input: union=nm.UNION, clusters=nm.CLUSTERS, metadata=nm.METADATA
-    output: nm.CLTAGGED
-    run:
-        argv = [PY, str(STEPS / "lexicon_cltagged.py"), "--union", input.union,
-                "--clusters", input.clusters, "--metadata", input.metadata,
-                "--out", output[0]]
-        run_body(nm.LEXICON_DIR, argv, "lexicon_cltagged")
-
 rule name_patterns:
-    """One run's MoDISco patterns -> TF of the first TomTom match against the union.
-    No gate (user, 2026-09-27)."""
-    input: h5="results/{run}/modisco/modisco.h5",
-           lex=lambda w: nm.naming_inputs(config)
+    """One run's MoDISco patterns -> TF of the first TomTom match against the union."""
+    input: h5="results/{run}/modisco/modisco.h5", lex=nm.UNION,
+           h14=lambda w: nm.params(config)["h14_annotation"]
     output: nm.run_names("{run}")
     params: sig=sig_naming
     wildcard_constraints: run=_alt(sorted(config["runs"]))
     run:
         out = f"results/{wildcards.run}/naming"
         argv = [PY, str(STEPS / "name_patterns.py"),
-                "--h5", f"{wildcards.run}={input.h5}",
-                "--target", nm.UNION,
+                "--h5", f"{wildcards.run}={input.h5}", "--target", input.lex,
+                "--h14_annotation", input.h14,
                 "--tomtom", nm.params(config)["tomtom"], "--out_dir", out]
-        run_body(out, argv, "name_patterns", env=COMPUTE_THREADS, sig=params.sig)
+        run_body(out, argv, "name_patterns", sig=params.sig)

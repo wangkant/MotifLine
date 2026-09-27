@@ -1,14 +1,6 @@
-"""One ``run_info.json`` per stage directory: what produced the files next to it.
+"""One ``run_info.json`` per stage directory: which tool versions, which argv, when.
 
-A results tree is only worth handing to somebody else if each directory can answer
-"which version of which tool, at which parameters, when". Nothing else in this
-pipeline records that: the attribution/discovery/hit-calling versions live in a conda
-prefix that is not part of the artifacts, and the parameters live in a config file that
-gets edited. A stage that finished six months ago cannot be read back from either.
-
-This is deliberately not the audit layer that was removed on 2026-08-14 -- it writes
-one file, it is never read back by the pipeline, and no stage refuses to run because of
-it. It is a label on the output, not a gate on the input.
+A label on the output: the pipeline never reads it back and never refuses to run on it.
 """
 from __future__ import annotations
 
@@ -24,7 +16,7 @@ from motifline import __version__
 
 #: What the compute env contributes to a result, in the order worth reading.
 PACKAGES = ("finemo", "modisco-lite", "tangermeme", "chrombpnet-pytorch",
-            "gpn", "torch", "numpy")
+            "torch", "numpy")
 
 RUN_INFO = "run_info.json"
 

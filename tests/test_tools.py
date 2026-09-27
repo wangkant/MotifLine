@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import CHROMBPNET_SRC, COMPUTE, has_chrombpnet_src, has_compute
-from motifline.tools import (PINNED, deviations, parse_help_defaults, pinned_defaults,
-                             tool_version)
+from conftest import COMPUTE, has_compute
+from motifline.tools import deviations, live_defaults, parse_help_defaults
 
 HELP = """usage: finemo call-hits [-h] [-M {pp,hp,ph,hh}] -r REGIONS
 
@@ -62,27 +61,12 @@ def test_an_option_with_no_stated_default_is_absent_rather_than_none():
     assert parse_help_defaults(text) == {}
 
 
-# --- against the tools actually installed -----------------------------------
-
 @has_compute
-def test_the_installed_modisco_reports_the_defaults_we_pinned():
-    from motifline.tools import live_defaults
-    got = live_defaults("modisco-lite", COMPUTE)
-    for flag, value in pinned_defaults("modisco-lite").items():
-        assert got[flag] == value, f"{flag}: installed {got[flag]!r}, pinned {value!r}"
-
-
-@has_compute
-def test_the_installed_finemo_reports_the_defaults_we_pinned():
-    from motifline.tools import live_defaults
-    got = live_defaults("finemo", COMPUTE)
-    for flag, value in pinned_defaults("finemo").items():
-        assert got[flag] == value, f"{flag}: installed {got[flag]!r}, pinned {value!r}"
-
-
-@has_compute
-def test_tool_version_reads_the_env_not_the_orchestrator():
-    assert tool_version("finemo", COMPUTE) == "0.30"
+def test_the_installed_tools_state_a_default_for_every_parameter_we_compare():
+    from motifline.tools import PARAMETERS
+    for p in PARAMETERS:
+        if p.official_default_exists:
+            assert p.flag.lstrip("-") in live_defaults(p.tool, COMPUTE), p.key
 
 
 # --- deviations -------------------------------------------------------------
@@ -124,29 +108,7 @@ def test_a_parameter_with_no_official_default_is_not_a_deviation():
     assert deviations(cfg(modisco_max_seqlets=123), LIVE) == []
 
 
-def test_a_tool_whose_own_default_moved_since_we_pinned_it_is_reported():
-    moved = {**LIVE, "finemo": {**LIVE["finemo"], "global-lambda": 0.9}}
-    rows = deviations(cfg(), moved, pinned=PINNED)
-    assert any(r.kind == "tool-default-moved" and r.flag == "--global-lambda"
-               for r in rows)
-
-
-def test_config_following_a_moved_tool_default_is_still_reported():
-    """The trap: the tool moved its default AND config moved with it, so a live-only
-    comparison sees nothing wrong while the configuration is no longer the published one."""
-    moved = {**LIVE, "finemo": {**LIVE["finemo"], "global-lambda": 0.9}}
-    rows = deviations(cfg(finemo_alpha=0.9), moved, pinned=PINNED)
-    assert any(r.kind == "tool-default-moved" for r in rows)
-
-
-def test_pinned_defaults_cover_every_parameter_the_pipeline_sets():
-    from motifline.tools import PARAMETERS
-    for p in PARAMETERS:
-        if p.official_default_exists:
-            assert p.flag.lstrip("-") in pinned_defaults(p.tool), p.key
-
-
-# --- rendering and probing ---------------------------------------------------
+# --- rendering ---------------------------------------------------
 
 def test_no_deviations_renders_as_a_positive_statement():
     from motifline.tools import render_deviations
@@ -157,25 +119,3 @@ def test_no_deviations_renders_as_a_positive_statement():
 def test_a_config_deviation_renders_key_value_and_official_value():
     line = deviations(cfg(modisco_window=500), LIVE)[0].line()
     assert "modisco.window" in line and "500" in line and "400" in line
-
-
-def test_a_moved_tool_default_renders_the_version_it_was_pinned_at():
-    moved = {**LIVE, "finemo": {**LIVE["finemo"], "global-lambda": 0.9}}
-    row = [r for r in deviations(cfg(), moved, pinned=PINNED)
-           if r.kind == "tool-default-moved"][0]
-    assert "0.30" in row.line() and "0.9" in row.line()
-
-
-@has_compute
-@has_chrombpnet_src
-def test_a_checkout_that_provides_the_module_probes_importable():
-    from motifline.tools import can_import
-    ok, detail = can_import("chrombpnet.bpnet", CHROMBPNET_SRC, COMPUTE)
-    assert ok, detail
-
-
-@has_compute
-def test_a_checkout_that_does_not_provide_it_probes_as_a_reason_not_a_crash(tmp_path):
-    from motifline.tools import can_import
-    ok, detail = can_import("chrombpnet.bpnet", str(tmp_path), COMPUTE)
-    assert not ok and "ModuleNotFoundError" in detail

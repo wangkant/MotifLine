@@ -20,10 +20,8 @@ def cfg_cbp(**over):
         "finemo": {"mode": "pp", "threshold": 0.3, "alpha": 0.7, "batch": 2000},
         "reference_lexicon": {
             "sources": {"H14": "/l/h14.meme"},
-            "rsat": {"bin": "/e/rsat/bin/rsat", "hclust_method": "average",
-                     "metric": "Ncor", "lth": {"cor": 0.75, "Ncor": 0.55}, "quick": True},
-            "w_th": 5,
             "tomtom": "/e/meme/bin/tomtom",
+            "h14_annotation": "/l/H14CORE_annotation.jsonl",
         },
         "runs": {"r1": {"model": "cbp", "wo_bias": "/m/wo_bias.pt", "peaks": "p.bed"}},
     }
@@ -95,12 +93,6 @@ def test_adopted_run_needs_adopt_from_and_rows_not_the_model_keys():
     p = problems(c, paths=False)
     assert only(p, "rows")
     assert not only(p, "wo_bias")
-
-
-def test_cancelled_run_must_say_where_the_decision_is_written():
-    c = cfg_cbp()
-    c["runs"]["r1"]["cancelled"] = True
-    assert only(problems(c, paths=False), "cancelled_note")
 
 
 def test_empty_runs_is_reported():

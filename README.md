@@ -67,7 +67,7 @@ matches each pattern against it, and the first match gives the name.
 
 ## Installation
 
-Setup uses four conda environments, model source checkouts, model weights, and
+Setup uses three conda environments, model source checkouts, model weights, and
 reference data. Follow the [installation guide](docs/INSTALL.md) for the complete
 setup, including CUDA requirements and reference file formats.
 
@@ -79,7 +79,6 @@ ENVS=$HOME/motifline-envs
 conda env create -p "$ENVS/orchestration" -f envs/orchestration.yaml
 conda env create -p "$ENVS/compute"       -f envs/compute.yaml
 conda env create -p "$ENVS/meme"          -f envs/meme.yaml
-conda env create -p "$ENVS/rsat"          -f envs/rsat.yaml
 "$ENVS/orchestration/bin/pip" install -e .
 conda activate "$ENVS/orchestration"
 ```
@@ -102,7 +101,6 @@ the repository directory with the orchestration environment active:
 motifline init                 # create config/default.yaml
 $EDITOR config/default.yaml    # set paths, model weights, and runs
 motifline check                # validate configuration and input paths
-motifline doctor               # inspect versions, defaults, and model imports
 motifline smoke                # check motif discovery and hit calling on CPU
 motifline run -n               # preview the workflow
 motifline run -j 8 --gpus 2     # execute with up to 8 jobs and 2 GPU resources
@@ -130,20 +128,18 @@ and cancelled runs, along with shared parameters and reference settings.
 | `cancelled: true` | Exclude the run from default targets; explicit targets remain available. |
 
 The configuration follows upstream tool defaults where applicable and documents
-explicit choices where required. `motifline doctor` reports deviations from
-installed defaults and changes relative to the pinned defaults, so intentional
-parameter choices remain visible.
+explicit choices where required. `motifline check` reports where parameters deviate
+from the installed tools' defaults, so intentional parameter choices remain visible.
 
 ### Validate the setup
 
 | Command | What it checks |
 |---|---|
 | `motifline check` | Missing or misspelled keys, missing paths, and peak files without the required summit column, reported together. |
-| `motifline doctor` | Configuration, installed tool versions and defaults, parameter deviations, and model imports. Parameter deviations alone do not block a run. |
 | `motifline smoke` | Recovery of an AP-1 motif planted in 180 of 300 synthetic attributions using MoDISco and FiNeMo. Runs on CPU in about a minute without model weights. |
 
 The smoke test covers motif discovery and hit calling. It does **not** validate
-model attribution or the reference naming chain.
+model attribution or naming.
 
 ## Outputs
 
@@ -205,8 +201,7 @@ The AG DeepLIFT rules are Ruchir Rastogi's; cite them from his repository rather
 the port or from DeepMind.
 
 Published references for the methods: DeepLIFT — Shrikumar, Greenside & Kundaje (2017),
-ICML, arXiv:1704.02685 · TF-MoDISco — Shrikumar et al. (2018), arXiv:1811.00416 · RSAT
-matrix-clustering — Castro-Mondragon et al. (2017), *NAR* 45:e119, doi:10.1093/nar/gkx314
+ICML, arXiv:1704.02685 · TF-MoDISco — Shrikumar et al. (2018), arXiv:1811.00416
 · TomTom — Gupta et al. (2007), *Genome Biology* 8:R24, doi:10.1186/gb-2007-8-2-r24 ·
 MEME Suite — Bailey et al. (2015), *NAR* 43:W39, doi:10.1093/nar/gkv416 · Snakemake —
 Mölder et al. (2021), *F1000Research* 10:33, doi:10.12688/f1000research.29032.2

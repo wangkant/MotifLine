@@ -1,16 +1,19 @@
 #!/usr/bin/env python
 """MoDISco patterns -> names, through TomTom against the source union.
 
-The naming chain, in one stage (user, 2026-09-27: TomTom against the current union
-library; every hand-set gate dropped):
+The naming chain, in one stage:
 
     modisco.h5  --modiscolite trim-->  query.meme
                 --TomTom vs lexicon_sources_union.meme-->  top 3 library matches
-                --TF symbol of the first match-->  name
+                --gene symbol of the first match's TF-->  name
+
+The library id stays in ``match0..2``; ``tf0..2`` and ``name`` are HGNC gene symbols.
+A HOCOMOCO id's prefix is the UniProt entry name (``TYY1.H14CORE...`` is YY1), so its
+symbol is read from HOCOMOCO's own annotation; a JASPAR id carries the symbol after
+``_``, upper-cased so mouse-derived entries (``Banp``) read as the human gene.
 
 Nothing is gated: every pattern is named after its first match whatever its q-value,
-and the q-value is reported beside it. No RSAT cluster, no Ncor arm, no family, no
-repeat call, no name shared across models.
+and the q-value is reported beside it.
 
 Two details that are load-bearing:
 
@@ -25,19 +28,18 @@ Two details that are load-bearing:
 """
 import argparse
 import hashlib
+import json
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from motif_matrix import MEME_HEADER  # noqa: E402
-
+MEME_HEADER = ("MEME version 4\n\nALPHABET= ACGT\n\nstrands: + -\n\n"
+               "Background letter frequencies\nA 0.25 C 0.25 G 0.25 T 0.25\n\n")
 GROUPS = ("pos_patterns", "neg_patterns")
 
 
@@ -100,14 +102,29 @@ def tomtom_argv(tomtom, query, target, out_dir):
             str(query), str(target)]
 
 
-def tf_name(motif_id):
-    """TF symbol out of a union id. JASPAR: MA0140.3_GATA1::TAL1 -> GATA1::TAL1.
-    HOCOMOCO v14: CTCF.H14CORE.0.P.B -> CTCF."""
+def h14_symbols(annotation_jsonl):
+    """``{H14 id: HUMAN gene symbol}`` from HOCOMOCO's ``H14CORE_annotation.jsonl``."""
+    out = {}
+    for line in open(annotation_jsonl):
+        if line.strip():
+            r = json.loads(line)
+            out[r["name"]] = r["masterlist_info"]["species"]["HUMAN"]["gene_symbol"]
+    return out
+
+
+def tf_name(motif_id, h14):
+    """Gene symbol of a union id. HOCOMOCO: TYY1.H14CORE.0.P.B -> YY1 (via ``h14``);
+    JASPAR: MA0140.3_GATA1::TAL1 -> GATA1::TAL1, MA2503.1_Banp -> BANP.
+    An id that is neither raises KeyError."""
     s = str(motif_id)
+    if not s:
+        return ""
+    if s in h14:
+        return h14[s]
     m = re.match(r"^(?:MA|UN|PB)\d+\.\d+_(.+)$", s)
     if m:
-        return m.group(1)
-    return s.split(".")[0] if s else ""
+        return m.group(1).upper()
+    raise KeyError(f"{s}: not in the HOCOMOCO annotation and not a JASPAR id")
 
 
 def _top(tsv, n=3):
@@ -122,6 +139,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--h5", action="append", required=True, help="label=modisco.h5, repeatable")
     p.add_argument("--target", required=True, help="lexicon_sources_union.meme")
+    p.add_argument("--h14_annotation", required=True, help="H14CORE_annotation.jsonl")
     p.add_argument("--tomtom", required=True)
     p.add_argument("--out_dir", required=True)
     a = p.parse_args()
@@ -129,6 +147,7 @@ def main():
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     leaves = [s.split("=", 1) for s in a.h5]
+    h14 = h14_symbols(a.h14_annotation)
 
     # ---- 1. query MEME per leaf, on modiscolite's trim ----
     pats = {}
@@ -150,11 +169,8 @@ def main():
     for label, _ in leaves:
         d = out / f"tomtom_{label}"
         stamp = d / "target.sha256"
-        # Reuse only when the SAME target library produced a COMPLETE run. Existence
-        # alone was not enough: a rebuilt reference lexicon left the old tomtom.tsv in
-        # place (it is not a rule output, so snakemake never removed it) and the names
-        # came from the previous library while db.yaml recorded the new one; and an
-        # interrupted TomTom left a truncated tsv that parsed without complaint.
+        # Reuse only a complete run against the same library: tomtom.tsv is not a rule
+        # output, so snakemake never removes a stale or truncated one.
         usable = (d / "tomtom.tsv").exists() and _complete(d / "tomtom.tsv") \
             and stamp.exists() and stamp.read_text().strip() == target_key
         if not usable:
@@ -165,7 +181,7 @@ def main():
             stamp.write_text(target_key + "\n")
         print(f"  tomtom {label} done", flush=True)
 
-    # ---- 3. assemble: name = TF of the first match, no gate ----
+    # ---- 3. assemble: name = gene symbol of the first match, no gate ----
     rows = []
     for label, _ in leaves:
         hits = _top(out / f"tomtom_{label}" / "tomtom.tsv")
@@ -177,18 +193,17 @@ def main():
             for i in range(3):
                 tid = h[i][0] if len(h) > i else ""
                 rec[f"match{i}"] = tid
-                rec[f"tf{i}"] = tf_name(tid)
+                rec[f"tf{i}"] = tf_name(tid, h14)
                 rec[f"pval{i}"] = float(h[i][1]) if len(h) > i else np.nan
                 rec[f"qval{i}"] = float(h[i][2]) if len(h) > i else np.nan
                 rec[f"overlap{i}"] = int(h[i][3]) if len(h) > i else -1
             rec["name"] = rec["tf0"]
             rows.append(rec)
     df = pd.DataFrame(rows)
-    # Provenance on the table itself: someone holding pattern_names.tsv must be able to
-    # say which library produced these names, and config/default.yaml is deliberately
-    # untracked, so it cannot be the answer.
+    # Which library produced these names, on the table itself.
     df["target"] = Path(a.target).name
     df["target_sha256"] = target_key[:12]
+    df["h14_annotation_sha256"] = _digest(a.h14_annotation)[:12]
     df.to_csv(out / "pattern_names.tsv", sep="\t", index=False)
     print(f"\npattern_names.tsv: {len(df)} patterns; without any TomTom match "
           f"{int((df.match0 == '').sum())}")

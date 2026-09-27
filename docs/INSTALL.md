@@ -1,6 +1,6 @@
 # Installing motifline
 
-Four conda environments, two model source checkouts, three reference files, one
+Three conda environments, two model source checkouts, three reference files, one
 config. `motifline check` tells you what is still missing, and `motifline smoke`
 tells you whether the half that does not need a model works.
 
@@ -30,7 +30,6 @@ ENVS=$HOME/motifline-envs                  # or wherever
 conda env create -p $ENVS/orchestration -f envs/orchestration.yaml
 conda env create -p $ENVS/compute       -f envs/compute.yaml
 conda env create -p $ENVS/meme          -f envs/meme.yaml      # TomTom
-conda env create -p $ENVS/rsat          -f envs/rsat.yaml      # matrix-clustering
 $ENVS/orchestration/bin/pip install -e .
 ```
 
@@ -39,9 +38,6 @@ $ENVS/orchestration/bin/pip install -e .
 | orchestration | snakemake, `motifline` | always |
 | compute | the attribution steps, MoDISco, FiNeMo | always |
 | meme | `tomtom` | naming patterns |
-| rsat | `matrix-clustering` | building the reference lexicon (once) |
-
-`mamba` works in place of `conda` and is much faster on the rsat env (733 packages).
 
 **CUDA.** `envs/compute.yaml` pins `torch==2.3.1+cu121`. If your driver needs a
 different CUDA build, change that line and the `--extra-index-url` above it. The
@@ -85,9 +81,8 @@ Model weights are yours to supply: a ChromBPNet run needs a bias-corrected check
 | HOCOMOCO H14 CORE, MEME format (1,595 matrices) | `reference_lexicon.sources.H14` | hocomoco.autosome.org |
 | JASPAR CORE vertebrates non-redundant, MEME format (1,019) | `reference_lexicon.sources.JAS` | jaspar.elixir.no |
 
-Both motif libraries are the publishers' own non-redundant releases and are used
-without further de-duplication on purpose; `src/motifline/naming.py` says why the
-TomTom target has to be the full set rather than the cluster representatives.
+Both motif libraries are the publishers' own non-redundant releases, used without
+further de-duplication: TomTom matches against their union.
 
 Peaks must be 10- or 11-column narrowPeak with the summit offset in column 10:
 `finemo extract-regions-modisco-fmt -p` names the first ten columns positionally and
@@ -111,20 +106,7 @@ sharded, adopted, and cancelled. `motifline check` reports missing keys, misspel
 keys (`n_shard` would otherwise silently make a sharded run single-process), paths
 that do not exist and peaks files without a summit column — all of them in one pass.
 
-## 6. Is it set up correctly?
-
-```bash
-motifline doctor
-```
-
-One page: the config and its problems, the tool versions the compute env actually
-reports, whether every parameter is on its tool's official default, the config-key →
-tool-flag mapping, and whether the model checkouts import the way the attribution steps
-import them. A deviating parameter is reported, never blocked.
-
-`doctor` exits non-zero on a config problem, never on a deviation.
-
-## 7. Does it work?
+## 6. Does it work?
 
 ```bash
 motifline smoke
@@ -135,10 +117,9 @@ MoDISco and FiNeMo over them, and checks that the motif comes back. It takes abo
 minute on CPU and needs no genome, no model weights and no GPU.
 
 It covers the compute environment and the downstream half of the pipeline. It does
-**not** cover the attribution steps (they need real model weights) or the naming chain
-(it needs the RSAT clustering, which is 1h46m).
+**not** cover the attribution steps (they need real model weights) or naming.
 
-## 8. Running
+## 7. Running
 
 ```bash
 motifline run -j 8 --gpus 2
@@ -146,26 +127,13 @@ motifline run -n                                        # dry run
 motifline run results/<run>/hits/hits.tsv -j 4          # one target
 ```
 
-`motifline run` is `snakemake` with `--rerun-triggers mtime params` baked in. That is
-not a convenience: with snakemake's default `mtime` alone, editing `finemo.threshold`
-or `modisco.window` leaves every finished stage in place and snakemake reports
-"Nothing to be done", so `results/` ends up holding a mixture of parameter generations
-that nothing on disk distinguishes from a coherent tree.
+`motifline run` is `snakemake` after a config check, with snakemake's own rerun
+triggers: a stage reruns when its inputs, its parameters or its rule code change.
 
 Every `run` prints the parameter deviation report before it starts.
 
 GPU selection is the caller's. Export `CUDA_VISIBLE_DEVICES` to fully-free cards,
 pinned by UUID rather than index, and bound concurrency with `--gpus`.
-
-## Upgrading a tool
-
-`src/motifline/tool_defaults.yaml` pins what each tool's defaults were at the version
-this pipeline's parameters were chosen against. After a deliberate upgrade, run
-`motifline doctor`: any default the new version moved is listed. Decide for each one
-whether it is a change you meant to adopt, then edit the `version` and the value in
-that file. Re-pinning is how an upgrade gets acknowledged; it is not a formality, and
-it is the only thing that keeps "these are the official defaults" from quietly
-becoming "these were the official defaults in 2026".
 
 ## Reproducing the exact environment
 

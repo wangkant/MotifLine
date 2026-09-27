@@ -1,19 +1,9 @@
-"""What a config has to contain, checked before the DAG is built.
+"""What a config has to contain, reported in one pass before the DAG is built.
 
-Every stage of this pipeline is a subprocess assembled from config, so a key that is
-missing, misspelled or pointing at nothing does not fail where it is wrong -- it fails
-hours later inside whichever stage first reads it, or, worse, does not fail at all: a
-run entry carrying ``n_shard: 4`` is a perfectly valid single-process run.
-
-This module states the schema once and reports **every** problem in one pass, so that
-fixing a config is one edit rather than a sequence of crashes. It is called twice: by
-``motifline check`` against the filesystem, and by the Snakefile at load time with
-``paths=False`` -- structure only, because the DAG must still build on a machine where
-the archives have been moved away.
-
-The schema is conditional, because most of it is: a config with only adopted runs needs
-no genome, and one whose runs are all adopted needs no model source. What is required
-is derived from the runs that are actually declared.
+A misspelled key is the case worth catching: ``n_shard: 4`` is a valid single-process
+run. Called by ``motifline check`` (with the filesystem) and by the Snakefile at load
+time (``paths=False``, so the DAG still builds where archives have moved). What is
+required follows from the runs declared: adopted runs need no genome or model source.
 """
 from __future__ import annotations
 
@@ -168,25 +158,17 @@ def _run_structure(name: str, r) -> list[str]:
                    f"misspelling here changes the run silently "
                    f"(expected some of {sorted(allowed)})")
 
-    if r.get("cancelled") and not r.get("cancelled_note"):
-        out.append(f"runs.{name}.cancelled_note: a cancelled run must point at the "
-                   f"CANCELLED.md holding the decision; a flag is not a reason")
     if r.get("n_shards") and adopted:
         out.append(f"runs.{name}.n_shards: an adopted run computes nothing to shard")
     return out
 
 
 def _lexicon(cfg: dict) -> list[str]:
-    """Delegate to naming.py, which owns these rules, and report what it refuses."""
-    out = []
-    for fn in (nm.params, nm.rsat, lambda c: nm.rsat_argv(c, "<u>", "<o>"), nm.w_th):
-        try:
-            fn(cfg)
-        except nm.NamingError as e:
-            out.append(str(e).strip("'"))
-        except (KeyError, TypeError, ValueError) as e:
-            out.append(f"reference_lexicon: {e}")
-    return sorted(set(out))
+    try:
+        nm.params(cfg)
+    except nm.NamingError as e:
+        return [str(e).strip("'")]
+    return []
 
 
 # --- filesystem ------------------------------------------------------------
@@ -248,14 +230,12 @@ def _paths(cfg: dict, runs: dict, base: Path) -> list[str]:
     for tag, path in (lex.get("sources") or {}).items():
         out += _exists(base, f"reference_lexicon.sources.{tag}", path)
     out += _exists(base, "reference_lexicon.tomtom", lex.get("tomtom"), kind="exe")
-    out += _exists(base, "reference_lexicon.rsat.bin",
-                   (lex.get("rsat") or {}).get("bin"), kind="exe")
+    out += _exists(base, "reference_lexicon.h14_annotation", lex.get("h14_annotation"))
     for name in sorted(runs):
         r = runs[name]
         if not isinstance(r, dict):
             continue
-        # A cancelled run is how a frozen stage tree is recorded, and the archive it
-        # adopted may well have been deleted since -- that is the state, not an error.
+        # A cancelled run's archive may be gone; that is its state, not an error.
         if r.get("cancelled"):
             continue
         for key, kind in (("wo_bias", "file"), ("weights", "file"),

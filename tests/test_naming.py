@@ -24,15 +24,12 @@ def _load(name):
 
 
 union_step = _load("lexicon_union")
-medoid_step = _load("lexicon_medoid")
 name_step = _load("name_patterns")
 
 CFG = {"reference_lexicon": {
     "sources": {"H14": "/lib/h14.meme", "JAS": "/lib/jaspar.meme"},
-    "rsat": {"bin": "/env/rsat/bin/rsat", "hclust_method": "average",
-             "metric": "Ncor", "lth": {"cor": 0.75, "Ncor": 0.55}, "quick": True},
     "tomtom": "/env/meme/bin/tomtom",
-    "w_th": 5}}
+    "h14_annotation": "/lib/H14CORE_annotation.jsonl"}}
 
 HOCOMOCO_STYLE = """MEME version 4
 
@@ -56,7 +53,7 @@ letter-probability matrix: alength= 4 w= 1 nsites= 20 E= 0
 
 
 def test_union_adds_the_E_field_hocomoco_omits(tmp_path):
-    """Without ``E= 0`` RSAT drops the whole HOCOMOCO half and says nothing."""
+    """The union is kept byte-identical to the one the existing names came from."""
     p = tmp_path / "h14.meme"
     p.write_text(HOCOMOCO_STYLE)
     lines = union_step.blocks(p)
@@ -75,25 +72,37 @@ def test_union_does_not_double_the_E_field_or_split_jaspar_names(tmp_path):
     assert matrix_line.count("E=") == 1
 
 
-def test_cluster_label_names_the_medoid_it_represents():
-    """A label whose representative belongs to a TF the label omits is unreadable."""
-    label = medoid_step.cluster_label(
-        181, "MA0139.2_CTCF", ["CTCF", "CTCFL", "CTCFL2"], 3)
-    assert label.startswith("cl181_CTCF")
-    assert label.endswith("_n3")
+ANNOTATION = [
+    {"name": "TYY1.H14CORE.0.P.B",
+     "masterlist_info": {"species": {"HUMAN": {"gene_symbol": "YY1"}}}},
+    {"name": "CTCF.H14CORE.0.P.B",
+     "masterlist_info": {"species": {"HUMAN": {"gene_symbol": "CTCF"}}}},
+]
 
 
-def test_tf_name_reads_both_id_styles_and_keeps_jaspar_dimers():
-    """The union carries JASPAR as <id>_<symbol> (lexicon_union) and HOCOMOCO as
-    <TF>.H14CORE...; a dimer's '::' and a dotted HOCOMOCO suffix must not cut the name."""
-    assert name_step.tf_name("MA0139.2_CTCF") == "CTCF"
-    assert name_step.tf_name("MA0140.3_GATA1::TAL1") == "GATA1::TAL1"
-    assert name_step.tf_name("CTCF.H14CORE.0.P.B") == "CTCF"
-    assert name_step.tf_name("") == ""
+def test_names_are_gene_symbols_for_both_id_styles(tmp_path):
+    """An H14 prefix is the UniProt entry name (TYY1 is YY1), so the symbol comes from
+    HOCOMOCO's annotation; JASPAR's symbol is upper-cased, and a dimer keeps its '::'."""
+    p = tmp_path / "h14.jsonl"
+    p.write_text("".join(json.dumps(r) + "\n" for r in ANNOTATION))
+    h14 = name_step.h14_symbols(p)
+    assert name_step.tf_name("TYY1.H14CORE.0.P.B", h14) == "YY1"
+    assert name_step.tf_name("CTCF.H14CORE.0.P.B", h14) == "CTCF"
+    assert name_step.tf_name("MA0140.3_GATA1::TAL1", h14) == "GATA1::TAL1"
+    assert name_step.tf_name("MA2503.1_Banp", h14) == "BANP"
+    assert name_step.tf_name("", h14) == ""
 
 
-def test_naming_reads_the_union_not_the_tagged_copy():
-    assert nm.naming_inputs(CFG) == [nm.UNION]
+def test_an_h14_id_missing_from_the_annotation_is_refused_not_guessed():
+    with pytest.raises(KeyError):
+        name_step.tf_name("ZBT14.H14CORE.0.P.B", {})
+
+
+def test_naming_requires_the_h14_annotation():
+    cfg = {"reference_lexicon": {k: v for k, v in CFG["reference_lexicon"].items()
+                                 if k != "h14_annotation"}}
+    with pytest.raises(nm.NamingError, match="h14_annotation"):
+        nm.params(cfg)
 
 
 def test_tomtom_line_omits_mi_1():
@@ -111,28 +120,3 @@ def test_modisco_trim_is_the_thirty_percent_of_max_span():
     cwm[3] = [0.5, 0, 0, 0]
     trimmed, start, end = name_step.modisco_trim(ppm, cwm, threshold=0.3)
     assert (start, end) == (1, 4) and len(trimmed) == 3
-
-
-def test_rsat_thresholds_are_passed_explicitly():
-    """RSAT standalone defaults these to empty; the web server's values are not inherited."""
-    argv = nm.rsat_argv(CFG, "union.meme", "out/rsat")
-    for field, value in (("cor", "0.75"), ("Ncor", "0.55")):
-        i = [k for k, a in enumerate(argv) if a == "-lth" and argv[k + 1] == field]
-        assert i, f"-lth {field} missing"
-        assert argv[i[0] + 2] == value
-    assert argv[argv.index("-matrix") + 1] == "union"          # the union_m<N>_ id prefix
-
-
-def test_a_threshold_quick_would_discard_is_refused():
-    """RSAT accepts `-lth w 5 ... -quick` and then drops the w arm: the run reaches R as
-    `lthsp = 'Ncor_0.55_cor_0.75_'`. Config must state the thresholds in force."""
-    cfg = {"reference_lexicon": {**CFG["reference_lexicon"],
-                                 "rsat": {**CFG["reference_lexicon"]["rsat"],
-                                          "lth": {"w": 5, "cor": 0.75, "Ncor": 0.55}}}}
-    with pytest.raises(nm.NamingError, match="quick"):
-        nm.rsat_argv(cfg, "union.meme", "out/rsat")
-    # ...unless quick is off, where RSAT does honour it
-    cfg["reference_lexicon"]["rsat"]["quick"] = False
-    assert "-quick" not in nm.rsat_argv(cfg, "union.meme", "out/rsat")
-
-

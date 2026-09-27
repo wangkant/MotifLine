@@ -16,10 +16,9 @@ attribution:
   n_shuffles: 20         # == the tools' current default; verified, not assumed
   random_state: 42
 
-# Attribution windows are NOT configured here any more (geometry.py removed 2026-09-07):
-# a run that declares in_window/crop passes them to its step, an unspecified run gets
-# the step's own default (cbp 2114; ag 2048 in / 2048 stored), and every
-# downstream stage reads the width off attr.npy itself.
+# Attribution windows are per run: a run declaring in_window/crop passes them to its
+# step, otherwise the step's default applies (cbp 2114; ag 2048 in / 2048 stored).
+# Downstream stages read the width off attr.npy.
 
 runs:
   # ---- adopted runs: archived attributions linked in, downstream recomputed ----
@@ -92,37 +91,14 @@ finemo:
   batch: 2000            # -b, official default
   # -s 3.0, -i 0.08, -j 0.7, -c 5e-4, -S 10000 left unset = official defaults
 
-# Reference lexicon: where pattern NAMES come from (2026-08-25). Rationale:
-# src/motifline/naming.py. Naming (2026-09-27): sources -> union -> TomTom, name = TF of
-# the first match, no gate. The RSAT clustering, medoid library and cluster-tagged union
-# are still built by their rules but naming no longer reads them. Every rule reproduces an artifact
-# that was first built by hand; the pipeline versions were checked against those and
-# are byte-identical (union, medoid MEME, cluster-tagged union) or equal within
-# 1.1e-15 (the Ncor matrix).
+# Reference lexicon: where pattern names come from (TomTom against the union of these
+# sources, name = TF of the first match; src/motifline/naming.py).
 reference_lexicon:
-  # Concatenated in this order. Both are the publishers' own non-redundant releases;
-  # neither has been de-duplicated further, on purpose -- see naming.py on why the
-  # match target must be the full set.
+  # Concatenated in this order; the publishers' own non-redundant releases, not
+  # de-duplicated further.
   sources:
     H14: /path/to/hocomoco14_core.meme
     JAS: /path/to/jaspar2026_core_vert_nr.meme
-  rsat:
-    bin: /path/to/envs/rsat/bin/rsat      # rsat-core 2025.04.04
-    hclust_method: average
-    metric: Ncor
-    # RSAT standalone defaults these to EMPTY; the values below are the web server's
-    # documented defaults and have to be passed explicitly or the clustering differs.
-    # ONLY these two: under `-quick` RSAT rewrites %lth to {Ncor, cor} and discards
-    # every other arm (matrix-clustering:2249-2257). Verified live -- a run given
-    # `-lth w 5` alongside them reaches the R script as `lthsp = 'Ncor_0.55_cor_0.75_'`.
-    # Declaring `w` here is refused rather than silently dropped. The Ncor comparability
-    # floor used by the medoid pick is a different number (w_th below).
-    lth:
-      cor: 0.75
-      Ncor: 0.55
-    quick: true
-  # Minimum comparable overlap (columns) for the all-pairs Ncor that picks each
-  # cluster's medoid. NOT rsat.lth.w (RSAT discards that under -quick) and NOT TomTom's
-  # -min-overlap (pinned to modiscolite's parameter set). Naming does not read it.
-  w_th: 5
+  # HOCOMOCO's own annotation: H14 id -> HUMAN gene symbol for the names.
+  h14_annotation: /path/to/H14CORE_annotation.jsonl
   tomtom: /path/to/envs/meme/bin/tomtom

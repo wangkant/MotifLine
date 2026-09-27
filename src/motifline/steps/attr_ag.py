@@ -7,14 +7,8 @@ same AlphaGenomeWrapper("atac", track, 1000, resolution=1), same nonlinear-op ta
 (batch_size=1, local dinucleotide shuffle references, n_shuffles=20, hypothetical=True,
 random_state pinned).
 
-GEOMETRY (canonical since 2026-08-16): AG attributes its NATIVE 2048bp input and crops
-nothing -- ``--in_window 2048 --crop 2048``, the same pair
-``02_motif_grammar/interpret_ag2048_par_hyp/run_ag2048_par_hyp_k562.sh:33-34`` used, so
-these rows are comparable to that archive rather than to the 16384bp interpret_ag_par_hyp
-one. 2048 is AG's input floor (16 x 128bp bins); the CBP side stays at its own native
-2114bp. The old 16384/2114 pair is still reachable per run -- the adopted runs in
-config/default.yaml declare it, because that is the geometry their archives were computed
-at -- but it is no longer what an unspecified run gets.
+GEOMETRY: by default AG attributes its native 2048bp input and crops nothing
+(``--in_window 2048 --crop 2048``); the CBP side stays at its native 2114bp.
 
 Dropped relative to the shard script: --two_sided (a control, not the canonical path),
 --shuffle_input (a null control) and --subsample. Kept: the shard split (same linspace
@@ -48,7 +42,7 @@ def parse_args():
     ap.add_argument("--out_dir", required=True)
     ap.add_argument("--track", type=int, default=60, help="AG output track index (60 = K562 ATAC)")
     ap.add_argument("--in_window", type=int, default=2048,
-                    help="AG input window; 2048 = the native floor (16 x 128bp bins)")
+                    help="AG input window; a multiple of 2048")
     ap.add_argument("--crop", type=int, default=2048,
                     help="central crop of the attribution; == in_window means no crop")
     ap.add_argument("--n_shuffles", type=int, default=20)
@@ -68,10 +62,9 @@ def parse_args():
     if a.crop > a.in_window:
         ap.error(f"--crop {a.crop} exceeds --in_window {a.in_window}: crop_center would return a "
                  f"{a.in_window}bp array while every downstream stage is told the width is {a.crop}")
-    if a.in_window % 128 or (a.in_window // 128) & (a.in_window // 128 - 1) or a.in_window < 2048:
-        print(f"[attr_ag] WARNING: in_window={a.in_window} is not 2048 * 2^k. AG's trunk bins at "
-              f"128bp and windows off that grid have failed before; if this one runs, it ran.",
-              flush=True)
+    if a.in_window % 2048:
+        ap.error(f"--in_window {a.in_window} is not a multiple of 2048, which the AlphaGenome "
+                 f"U-Net needs (7 halvings, then repeat x2 with skips)")
     if (a.shard_i is None) != (a.n_shards is None):
         ap.error("--shard_i and --n_shards must be given together")
     if a.n_shards is not None:
@@ -185,11 +178,7 @@ def main():
 
     fasta = pyfaidx.Fasta(a.fasta)
 
-    # Rows whose N->A fill landed inside the KEPT window, written out at the end. At the old
-    # 16384/2114 geometry this list was always empty by construction: N occurred only in the
-    # large flanks and the flanks were cropped away. At the native 2048 geometry there are no
-    # flanks, so a filled base is a base MoDISco will read as an A that is not one -- it has to
-    # be counted rather than assumed absent.
+    # Rows whose N->A fill landed inside the kept window: MoDISco reads those bases as A.
     filled = []
 
     def attr_one(i):
