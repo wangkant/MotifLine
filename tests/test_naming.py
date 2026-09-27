@@ -32,8 +32,7 @@ CFG = {"reference_lexicon": {
     "rsat": {"bin": "/env/rsat/bin/rsat", "hclust_method": "average",
              "metric": "Ncor", "lth": {"cor": 0.75, "Ncor": 0.55}, "quick": True},
     "tomtom": "/env/meme/bin/tomtom",
-    "w_th": 5,
-    "gate": {"qval": 0.05, "ncor": 0.55}}}
+    "w_th": 5}}
 
 HOCOMOCO_STYLE = """MEME version 4
 
@@ -84,13 +83,17 @@ def test_cluster_label_names_the_medoid_it_represents():
     assert label.endswith("_n3")
 
 
-def test_gate_is_an_AND_so_a_significant_repeat_match_fails():
-    """The failure this arm exists for: an Alu B-box matching HSF1 at q ~ 1e-7 because
-    TTCGAA is an HSF1 half-site palindrome. Significant, and the wrong label."""
-    assert name_step.gated(1e-7, 0.90, 0.05, 0.55) is True
-    assert name_step.gated(1e-7, 0.31, 0.05, 0.55) is False     # Ncor arm
-    assert name_step.gated(0.63, 0.90, 0.05, 0.55) is False     # q arm
-    assert name_step.gated(1e-7, float("nan"), 0.05, 0.55) is False   # no comparable core
+def test_tf_name_reads_both_id_styles_and_keeps_jaspar_dimers():
+    """The union carries JASPAR as <id>_<symbol> (lexicon_union) and HOCOMOCO as
+    <TF>.H14CORE...; a dimer's '::' and a dotted HOCOMOCO suffix must not cut the name."""
+    assert name_step.tf_name("MA0139.2_CTCF") == "CTCF"
+    assert name_step.tf_name("MA0140.3_GATA1::TAL1") == "GATA1::TAL1"
+    assert name_step.tf_name("CTCF.H14CORE.0.P.B") == "CTCF"
+    assert name_step.tf_name("") == ""
+
+
+def test_naming_reads_the_union_not_the_tagged_copy():
+    assert nm.naming_inputs(CFG) == [nm.UNION]
 
 
 def test_tomtom_line_omits_mi_1():

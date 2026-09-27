@@ -24,7 +24,6 @@ def cfg_cbp(**over):
                      "metric": "Ncor", "lth": {"cor": 0.75, "Ncor": 0.55}, "quick": True},
             "w_th": 5,
             "tomtom": "/e/meme/bin/tomtom",
-            "gate": {"qval": 0.05, "ncor": 0.55},
         },
         "runs": {"r1": {"model": "cbp", "wo_bias": "/m/wo_bias.pt", "peaks": "p.bed"}},
     }

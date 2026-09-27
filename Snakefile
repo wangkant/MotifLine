@@ -1,8 +1,9 @@
 # Snakefile -- one line per run:
 #
 #     attribute (cbp | ag)  ->  discover  ->  extract_regions  ->  call_hits
-#                                            \->  name_patterns
+#                                            \->  name_patterns  (reads lexicon_union)
 #     built once:  lexicon_union -> lexicon_rsat -> lexicon_medoid -> lexicon_cltagged
+#                  (the last three are no longer read by naming, 2026-09-27)
 #
 # The cross-model merge (motiflex / MotifCompendium), the external-lexicon routes and
 # the finemo 0.30-vs-0.41 arm were removed on 2026-09-07 (branch `linear`); git history
@@ -58,8 +59,7 @@ def sig_import_attr(w):
 
 
 def sig_naming(w=None):
-    return param_sig(gate=nm.gate(config), tomtom=nm.params(config)["tomtom"],
-                     w_th=nm.w_th(config))
+    return param_sig(target=nm.UNION, tomtom=nm.params(config)["tomtom"])
 
 
 def run_body(out_dir, argv, stage, env=None, prefix=None, sig=None, packages=None,
@@ -253,6 +253,8 @@ rule discover:
         argv = [f"{ENV}/bin/modisco", "motifs", "-s", f"{attr_dir}/ohe.npy",
                 "-a", f"{attr_dir}/attr.npy", "-n", str(config["modisco"]["max_seqlets"]),
                 "-w", str(config["modisco"]["window"]), "-o", f"{out}/modisco.h5"]
+        if "n_leiden" in config["modisco"]:
+            argv += ["-l", str(config["modisco"]["n_leiden"])]
         run_body(out, argv, "discover", env=COMPUTE_THREADS, sig=params.sig)
 
 rule extract_regions:
@@ -357,19 +359,17 @@ rule lexicon_cltagged:
         run_body(nm.LEXICON_DIR, argv, "lexicon_cltagged")
 
 rule name_patterns:
-    """One run's MoDISco patterns -> cluster-level names, with the gate applied."""
+    """One run's MoDISco patterns -> TF of the first TomTom match against the union.
+    No gate (user, 2026-09-27)."""
     input: h5="results/{run}/modisco/modisco.h5",
            lex=lambda w: nm.naming_inputs(config)
     output: nm.run_names("{run}")
     params: sig=sig_naming
     wildcard_constraints: run=_alt(sorted(config["runs"]))
     run:
-        q, ncor = nm.gate(config)
         out = f"results/{wildcards.run}/naming"
         argv = [PY, str(STEPS / "name_patterns.py"),
                 "--h5", f"{wildcards.run}={input.h5}",
-                "--target", nm.CLTAGGED, *nm.source_argv(config),
-                "--tomtom", nm.params(config)["tomtom"],
-                "--w_th", str(nm.w_th(config)),
-                "--gate_q", str(q), "--gate_ncor", str(ncor), "--out_dir", out]
+                "--target", nm.UNION,
+                "--tomtom", nm.params(config)["tomtom"], "--out_dir", out]
         run_body(out, argv, "name_patterns", env=COMPUTE_THREADS, sig=params.sig)

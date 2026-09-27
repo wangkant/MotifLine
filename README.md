@@ -16,8 +16,8 @@ these stages, with a shared downstream workflow for both supported models.
 - **Discover motifs:** compute DeepLIFT/SHAP attributions with tangermeme and
   identify recurring patterns with TF-MoDISco through modisco-lite.
 - **Locate motif occurrences:** use FiNeMo to call motif hits across the analyzed regions.
-- **Annotate patterns:** match motifs with TomTom against an RSAT-clustered
-  HOCOMOCO and JASPAR reference lexicon, with significance and similarity gates.
+- **Annotate patterns:** match motifs with TomTom against the union of the
+  HOCOMOCO and JASPAR reference motifs; the first match names the pattern, with no gate.
 - **Keep analyses traceable:** record stage commands, parameters, environments,
   and tool versions in `run_info.json`; track parameter changes for reruns.
 - **Support different run modes:** compute new attributions in one process or
@@ -52,18 +52,18 @@ Genomic peaks + model weights + reference genome
              |     Call motif hits: FiNeMo
              |          hits.tsv
              v
-     Annotate: TomTom + annotation gates
+     Annotate: TomTom, first match, no gate
          pattern_names.tsv
              ^
              |
      Shared reference lexicon
      HOCOMOCO H14 CORE + JASPAR CORE vertebrates NR
-     -> RSAT clustering -> medoids + cluster-tagged union
+     -> their union
 ```
 
-The reference lexicon is built once and shared across runs. The reference set
-used in this repository yields 821 clusters, each represented by one medoid;
-TomTom matches against the cluster-tagged union of reference motifs.
+The reference lexicon is built once and shared across runs: the union of the
+HOCOMOCO H14 CORE and JASPAR CORE vertebrates non-redundant motifs. TomTom
+matches each pattern against it, and the first match gives the name.
 
 ## Installation
 
@@ -180,7 +180,7 @@ tests/                Tests runnable without a GPU
 ```
 
 Implementation rationale lives alongside the relevant code: `naming.py` covers
-the reference lexicon and annotation gates, `tools.py` covers parameter checks,
+the reference lexicon and the naming rule, `tools.py` covers parameter checks,
 `attribution.py` covers hypothetical attribution measurements, and
 `steps/attr_ag.py` / `steps/ag_support.py` cover AlphaGenome attribution.
 

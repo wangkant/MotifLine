@@ -53,9 +53,6 @@ reference_lexicon:
     quick: true
   w_th: 5
   tomtom: /path/to/envs/meme/bin/tomtom
-  gate:
-    qval: 0.05
-    ncor: 0.55
 
 # One entry per run. `model` picks the attribution step; what else the entry needs
 # follows from that and from whether it computes or adopts. `motifline check` lists

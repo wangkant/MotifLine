@@ -1,14 +1,18 @@
 #!/usr/bin/env python
-"""MoDISco patterns -> cluster-level names, through TomTom against the tagged union.
+"""MoDISco patterns -> names, through TomTom against the source union.
 
-The naming chain, in one stage:
+The naming chain, in one stage (user, 2026-09-27: TomTom against the current union
+library; every hand-set gate dropped):
 
     modisco.h5  --modiscolite trim-->  query.meme
-                --TomTom vs union_cltagged.meme-->  best library match
-                --the cluster id already in that match's name-->  assigned_cluster
-                --gate on (q, best_ncor)-->  annotated yes/no
+                --TomTom vs lexicon_sources_union.meme-->  top 3 library matches
+                --TF symbol of the first match-->  name
 
-Three details that are load-bearing:
+Nothing is gated: every pattern is named after its first match whatever its q-value,
+and the q-value is reported beside it. No RSAT cluster, no Ncor arm, no family, no
+repeat call, no name shared across models.
+
+Two details that are load-bearing:
 
 1. **The query trim is modiscolite's**, not ours: ``score = sum(|CWM|, axis=1)``, keep
    the span between the first and last column at or above 30% of the max, and cut the
@@ -18,17 +22,6 @@ Three details that are load-bearing:
 2. **``-mi 1`` is deliberately absent** from the TomTom command line. modiscolite passes
    it because it writes one motif per temporary file; against a batch query file it
    silently queries only the first motif and returns nothing for the rest.
-3. **``best_ncor`` is a second, independent measurement**, on the IC>0.3 core rather
-   than the |CWM| trim, from the same Ncor that built the cluster tree. The gate is
-   ``q < gate_q AND best_ncor >= gate_ncor``: q says "closer than chance", Ncor says
-   "close enough that the clustering would have merged them". q alone passes matches
-   that are statistically real and biologically wrong -- a repeat element whose core
-   happens to contain a TF half-site is the standard case.
-
-An ungated pattern is reported with its match and marked ``annotated=False``; it is not
-renamed. Nothing here assigns a *family*:
-grouping cluster ids into site types is a human judgement made once per project, not a
-derivable function of the matrices.
 """
 import argparse
 import hashlib
@@ -43,7 +36,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from motif_matrix import MEME_HEADER, ic_core, ncor_matrix, read_meme  # noqa: E402
+from motif_matrix import MEME_HEADER  # noqa: E402
 
 GROUPS = ("pos_patterns", "neg_patterns")
 
@@ -107,31 +100,29 @@ def tomtom_argv(tomtom, query, target, out_dir):
             str(query), str(target)]
 
 
-def gated(qval, best_ncor, gate_q, gate_ncor):
-    """Both arms, or not annotated. A missing Ncor (no comparable IC core) fails."""
-    return bool(qval == qval and qval < gate_q
-                and best_ncor == best_ncor and best_ncor >= gate_ncor)
+def tf_name(motif_id):
+    """TF symbol out of a union id. JASPAR: MA0140.3_GATA1::TAL1 -> GATA1::TAL1.
+    HOCOMOCO v14: CTCF.H14CORE.0.P.B -> CTCF."""
+    s = str(motif_id)
+    m = re.match(r"^(?:MA|UN|PB)\d+\.\d+_(.+)$", s)
+    if m:
+        return m.group(1)
+    return s.split(".")[0] if s else ""
 
 
 def _top(tsv, n=3):
-    """``{query: [[target, q, overlap], ...]}``, best q first."""
+    """``{query: [[target, p, q, overlap], ...]}``, best q first, ties broken by p."""
     t = pd.read_csv(tsv, sep="\t", comment="#").dropna(subset=["Query_ID"])
     t = t.sort_values(["Query_ID", "q-value", "p-value"])
-    cols = ["Target_ID", "q-value"] + (["Overlap"] if "Overlap" in t.columns else [])
+    cols = ["Target_ID", "p-value", "q-value", "Overlap"]
     return {q: g.head(n)[cols].values.tolist() for q, g in t.groupby("Query_ID")}
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--h5", action="append", required=True, help="label=modisco.h5, repeatable")
-    p.add_argument("--target", required=True, help="union_cltagged.meme")
-    p.add_argument("--source", action="append", required=True,
-                   help="tag=path of the untagged union sources, for the Ncor arm")
+    p.add_argument("--target", required=True, help="lexicon_sources_union.meme")
     p.add_argument("--tomtom", required=True)
-    p.add_argument("--w_th", type=int, required=True,
-                   help="minimum comparable overlap in columns for the Ncor arm")
-    p.add_argument("--gate_q", type=float, required=True)
-    p.add_argument("--gate_ncor", type=float, required=True)
     p.add_argument("--out_dir", required=True)
     a = p.parse_args()
 
@@ -154,7 +145,7 @@ def main():
         print(f"{label}: {len(pats[label])} patterns, trimmed width median "
               f"{np.median([len(r['trim']) for r in pats[label]]):.0f}", flush=True)
 
-    # ---- 2. TomTom against the tagged union (batch query: NO -mi 1) ----
+    # ---- 2. TomTom against the union (batch query: NO -mi 1) ----
     target_key = _digest(a.target)
     for label, _ in leaves:
         d = out / f"tomtom_{label}"
@@ -174,32 +165,7 @@ def main():
             stamp.write_text(target_key + "\n")
         print(f"  tomtom {label} done", flush=True)
 
-    # ---- 3. Ncor of each pattern's IC core against every library matrix ----
-    lib_names, lib_mats = [], []
-    for spec in a.source:
-        _, path = spec.split("=", 1)
-        for n, (ppm, _) in read_meme(path).items():
-            lib_names.append(n)
-            lib_mats.append(ppm)
-    nl = len(lib_mats)
-    core_of = []                       # (label, key) for each appended pattern row
-    mats = list(lib_mats)
-    for label, _ in leaves:
-        for r in pats[label]:
-            core = ic_core(r["ppm"], w_th=a.w_th)
-            r["ic_core_len"] = 0 if core is None else len(core)
-            if core is None:           # IC core shorter than the comparable minimum
-                continue
-            core_of.append((label, r["key"]))
-            mats.append(core)
-    S, _, _, _ = ncor_matrix(mats, w_th=a.w_th)
-    best_ncor = {}
-    for i, k in enumerate(core_of):
-        row = S[nl + i, :nl]
-        j = int(row.argmax())
-        best_ncor[k] = (round(float(row[j]), 3), lib_names[j])
-
-    # ---- 4. assemble: the cluster is already in the matched name ----
+    # ---- 3. assemble: name = TF of the first match, no gate ----
     rows = []
     for label, _ in leaves:
         hits = _top(out / f"tomtom_{label}" / "tomtom.tsv")
@@ -207,41 +173,29 @@ def main():
             h = hits.get(r["key"], [])
             rec = dict(label=label, key=r["key"], group=r["group"], pattern=r["pattern"],
                        n_seqlets=r["n_seqlets"], trim_len=len(r["trim"]),
-                       trim_start=r["trim_start"], trim_end=r["trim_end"],
-                       ic_core_len=r["ic_core_len"])
+                       trim_start=r["trim_start"], trim_end=r["trim_end"])
             for i in range(3):
                 tid = h[i][0] if len(h) > i else ""
-                rec[f"match{i}"] = tid.split("__", 1)[1] if "__" in tid else tid
-                rec[f"cluster{i}"] = tid.split("__", 1)[0] if "__" in tid else ""
-                rec[f"qval{i}"] = float(h[i][1]) if len(h) > i else np.nan
-                rec[f"overlap{i}"] = int(h[i][2]) if len(h) > i and len(h[i]) > 2 else -1
-            rec["assigned_cluster"] = rec["cluster0"]
-            seen = {rec[f"cluster{i}"] for i in range(3) if rec[f"cluster{i}"]}
-            rec["cluster_stable"] = bool(rec["cluster0"]) and len(seen) == 1
-            nc, nc_match = best_ncor.get((label, r["key"]), (np.nan, ""))
-            rec["best_ncor"] = nc
-            rec["best_ncor_match"] = nc_match
-            rec["annotated"] = gated(rec["qval0"], nc, a.gate_q, a.gate_ncor)
+                rec[f"match{i}"] = tid
+                rec[f"tf{i}"] = tf_name(tid)
+                rec[f"pval{i}"] = float(h[i][1]) if len(h) > i else np.nan
+                rec[f"qval{i}"] = float(h[i][2]) if len(h) > i else np.nan
+                rec[f"overlap{i}"] = int(h[i][3]) if len(h) > i else -1
+            rec["name"] = rec["tf0"]
             rows.append(rec)
     df = pd.DataFrame(rows)
     # Provenance on the table itself: someone holding pattern_names.tsv must be able to
-    # say which library and which gate produced these names, and config/default.yaml is
-    # deliberately untracked, so it cannot be the answer.
+    # say which library produced these names, and config/default.yaml is deliberately
+    # untracked, so it cannot be the answer.
     df["target"] = Path(a.target).name
     df["target_sha256"] = target_key[:12]
-    df["gate_q"] = a.gate_q
-    df["gate_ncor"] = a.gate_ncor
-    df["w_th"] = a.w_th
     df.to_csv(out / "pattern_names.tsv", sep="\t", index=False)
-    print(f"\npattern_names.tsv: {len(df)} patterns; annotated {int(df.annotated.sum())}, "
-          f"below the gate {int((~df.annotated).sum())} "
-          f"(q arm {int((df.qval0 >= a.gate_q).sum())}, "
-          f"Ncor arm {int((~(df.best_ncor >= a.gate_ncor)).sum())})")
+    print(f"\npattern_names.tsv: {len(df)} patterns; without any TomTom match "
+          f"{int((df.match0 == '').sum())}")
     for label, _ in leaves:
         s = df[df.label == label]
         print(f"\n===== {label} =====")
-        print(s[["key", "n_seqlets", "assigned_cluster", "qval0", "best_ncor",
-                 "cluster_stable", "annotated"]].to_string(index=False))
+        print(s[["key", "n_seqlets", "name", "match0", "qval0"]].to_string(index=False))
 
 
 if __name__ == "__main__":

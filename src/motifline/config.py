@@ -179,8 +179,7 @@ def _run_structure(name: str, r) -> list[str]:
 def _lexicon(cfg: dict) -> list[str]:
     """Delegate to naming.py, which owns these rules, and report what it refuses."""
     out = []
-    for fn in (nm.params, nm.gate, nm.rsat, lambda c: nm.rsat_argv(c, "<u>", "<o>"),
-               nm.w_th):
+    for fn in (nm.params, nm.rsat, lambda c: nm.rsat_argv(c, "<u>", "<o>"), nm.w_th):
         try:
             fn(cfg)
         except nm.NamingError as e:

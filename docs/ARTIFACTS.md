@@ -6,7 +6,8 @@ names are the same as a finished run's, so treat a directory as finished only
 after its target reruns clean.
 
 Shapes and dtypes below were read off `results/k562_cbp_full` and
-`results/k562_ag_adopted` (2026-08-14), not from the code that intends them.
+`results/k562_ag_adopted` (2026-08-14), not from the code that intends them. Those two
+directories no longer exist; the surviving runs are listed in `config/default.yaml`.
 
 Every stage directory also carries a **`run_info.json`** (since 2026-09-19),
 written after the body succeeded and never before: `stage`, the exact `argv`, the
@@ -145,7 +146,7 @@ hand-built originals, `ncor.npy` agrees to 1.1e-15.
 | `clusters_rsat.tsv` | flat `cluster, motif, source, is_medoid` |
 | `lexicon_rsat.meme` | one **medoid** PPM per cluster (never an average) |
 | `lexicon_rsat.metadata.tsv` | per cluster: `lexicon_id`, `size`, `medoid`, `width`, per-source counts, `min_ncor`, `tf_symbols`, `members` |
-| `union_cltagged.meme` | the union with `{lexicon_id}__` prefixed onto each name — the TomTom target |
+| `union_cltagged.meme` | the union with `{lexicon_id}__` prefixed onto each name — the TomTom target until 2026-09-27; naming now matches against `lexicon_sources_union.meme` |
 | `ncor.npy` | `(M, M) float64` all-pairs Ncor over the union, in source order. Evidence, **not a cache**: it is the similarity every cluster was judged on and nothing else on disk records it, but no stage reads it back |
 
 `E= 0` is not cosmetic: RSAT's MEME reader requires the field and drops records
@@ -158,23 +159,13 @@ like it worked.
 |---|---|
 | `<label>_query.meme` | the patterns as queried: PPM cut to modiscolite's `|CWM|` 30%-of-max span |
 | `tomtom_<label>/` | TomTom's own output (`-mi 1` deliberately absent — against a batch query it would score only the first pattern) |
-| `pattern_names.tsv` | one row per pattern: `label, key, group, pattern, n_seqlets, trim_*, ic_core_len`, `match0..2`/`cluster0..2`/`qval0..2`/`overlap0..2`, `assigned_cluster`, `cluster_stable`, `best_ncor`, `best_ncor_match`, `annotated`, plus the provenance the names depend on — `target`, `target_sha256`, `gate_q`, `gate_ncor`, `w_th` |
+| `pattern_names.tsv` | one row per pattern: `label, key, group, pattern, n_seqlets, trim_*`, `match0..2`/`tf0..2`/`pval0..2`/`qval0..2`/`overlap0..2`, `name`, plus the provenance the names depend on — `target`, `target_sha256` |
 | `tomtom_<label>/target.sha256` | digest of the library that produced that TomTom run. The run is reused only when the digest matches AND the TSV ends with TomTom's closing comment block; a rebuilt lexicon or a truncated file forces a re-run instead of being silently accepted |
 
-`assigned_cluster` is read off the winning target's name — the cluster id is
-already there, which is what the tagged union is for. `cluster_stable` says the
-top three matches all landed in one cluster; false means the pattern itself
-straddles clusters and the assignment deserves a look.
-
-`annotated` is the two-armed gate, `qval0 < gate.qval` **and**
-`best_ncor >= gate.ncor`. `best_ncor` is a second, independent measurement: Ncor
-of the pattern's IC>0.3 core against the untagged matrices, i.e. the same
-similarity the clustering was built on, on a different trim than the TomTom
-query. Rows failing either arm are kept with `annotated=False` and are not renamed. A pattern whose IC core is shorter than 5 columns has
-no comparable Ncor (`best_ncor` empty) and fails the gate by construction.
-
-Families are **not** here. Grouping cluster ids into site types is a human
-judgement made once per project; the chain stops at the cluster.
+`name` is `tf0`, the TF symbol of the first TomTom match against the source
+union (`lexicon_sources_union.meme`), for every pattern whatever its q-value
+(user, 2026-09-27). There is no gate, no RSAT cluster, no Ncor measurement and
+no family; `qval0` is reported beside the name and nothing is decided on it.
 
 ## `merge_shards` → `attr/`
 

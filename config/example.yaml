@@ -93,8 +93,9 @@ finemo:
   # -s 3.0, -i 0.08, -j 0.7, -c 5e-4, -S 10000 left unset = official defaults
 
 # Reference lexicon: where pattern NAMES come from (2026-08-25). Rationale:
-# src/motifline/naming.py. The chain is sources -> union -> RSAT clustering -> medoid
-# library + cluster-tagged union -> TomTom -> gate. Every rule reproduces an artifact
+# src/motifline/naming.py. Naming (2026-09-27): sources -> union -> TomTom, name = TF of
+# the first match, no gate. The RSAT clustering, medoid library and cluster-tagged union
+# are still built by their rules but naming no longer reads them. Every rule reproduces an artifact
 # that was first built by hand; the pipeline versions were checked against those and
 # are byte-identical (union, medoid MEME, cluster-tagged union) or equal within
 # 1.1e-15 (the Ncor matrix).
@@ -115,22 +116,13 @@ reference_lexicon:
     # every other arm (matrix-clustering:2249-2257). Verified live -- a run given
     # `-lth w 5` alongside them reaches the R script as `lthsp = 'Ncor_0.55_cor_0.75_'`.
     # Declaring `w` here is refused rather than silently dropped. The Ncor comparability
-    # floor used elsewhere in the naming chain is a different number (w_th below).
+    # floor used by the medoid pick is a different number (w_th below).
     lth:
       cor: 0.75
       Ncor: 0.55
     quick: true
-  # Minimum comparable overlap (columns) for the Ncor arm: the all-pairs Ncor that
-  # picks each cluster's medoid, and the IC-core floor below which a pattern has no
-  # comparable Ncor and so fails the gate by construction. NOT rsat.lth.w (RSAT
-  # discards that under -quick) and NOT TomTom's -min-overlap (pinned to modiscolite's
-  # parameter set). Three numbers that happen to be 5; this key owns two of them.
+  # Minimum comparable overlap (columns) for the all-pairs Ncor that picks each
+  # cluster's medoid. NOT rsat.lth.w (RSAT discards that under -quick) and NOT TomTom's
+  # -min-overlap (pinned to modiscolite's parameter set). Naming does not read it.
   w_th: 5
   tomtom: /path/to/envs/meme/bin/tomtom
-  # Both arms required. qval is the conventional 0.05; ncor is set to rsat.lth.Ncor on
-  # purpose -- "annotated" then means the clustering itself would have merged the
-  # pattern with its match, which is what rules out significant-but-wrong labels
-  # (a repeat element carrying a TF half-site is the standard case).
-  gate:
-    qval: 0.05
-    ncor: 0.55

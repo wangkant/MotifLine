@@ -1,32 +1,24 @@
-"""Where pattern names come from: the reference lexicon and the annotation gate.
+"""Where pattern names come from: the reference lexicon and TomTom.
 
 Until 2026-08-24 this pipeline named nothing: patterns travelled as ``pos_patterns.
 pattern_3`` and whatever label an upstream report had guessed.
 
-The naming chain adopted here is one source for every run of the pipeline:
+Since 2026-09-27 (user decision) a name is the TF of a pattern's first TomTom match
+against the source union, with no gate of any kind:
 
     sources (HOCOMOCO H14CORE + JASPAR CORE vert NR)
         -> union MEME, every matrix kept          (steps/lexicon_union.py)
-        -> RSAT matrix-clustering, its partition   (rule lexicon_rsat)
-        -> one medoid per cluster                  (steps/lexicon_medoid.py)
-        -> the union re-tagged with cluster ids    (steps/lexicon_cltagged.py)
-        -> TomTom, gate, cluster-level name        (steps/name_patterns.py)
+        -> TomTom, name = TF of the first match   (steps/name_patterns.py)
 
-Two properties of that chain are decisions, not defaults, and both live in config:
+The q-value travels with the name; nothing is renamed, withheld or merged on it. The
+RSAT clustering, medoid library and cluster-tagged union (rules lexicon_rsat,
+lexicon_medoid, lexicon_cltagged) are still buildable, but naming no longer reads
+them: the earlier chain named patterns by RSAT cluster and gated them on
+``q < 0.05 AND best_ncor >= 0.55``, and both were dropped on 2026-09-27.
 
-* **The TomTom target is the cluster-tagged union, not the medoid library.** Matching
-  against cluster representatives collapses sensitivity -- a pattern's best match is
-  usually some other member of its cluster -- while matching against the full set and
-  reading the cluster id back off the winner's name loses nothing. The medoid library
-  is built anyway, as the compact reference to plot and publish from.
-* **The gate is two-armed**: ``q < gate.qval`` AND ``best_ncor >= gate.ncor``. The Ncor
-  arm is set to the clustering's own merge floor, so "annotated" means the match is both
-  better than chance and close enough that the library build would have merged them.
-  A pattern that fails either arm keeps its match in the table and is not renamed.
-
-Families -- grouping cluster ids into site types so that two models' patterns can be
-paired -- are a human judgement made once per project and are deliberately not derived
-here. This module stops at the cluster.
+The TomTom target is the full union, not the medoid library: matching against
+representatives collapses sensitivity, since a pattern's best match is usually some
+other member of its cluster.
 """
 from __future__ import annotations
 
@@ -48,7 +40,7 @@ class NamingError(KeyError):
 
 def params(cfg: dict) -> dict:
     c = cfg.get("reference_lexicon") or {}
-    missing = [k for k in ("sources", "rsat", "tomtom", "gate", "w_th") if k not in c]
+    missing = [k for k in ("sources", "rsat", "tomtom", "w_th") if k not in c]
     if missing:
         raise NamingError(f"config.reference_lexicon is missing {missing}")
     if not c["sources"]:
@@ -70,24 +62,12 @@ def source_argv(cfg: dict) -> list[str]:
 
 
 def w_th(cfg: dict) -> int:
-    """Minimum comparable overlap, in columns, for the Ncor arm of the chain.
-
-    Used in two places that must not drift apart: the all-pairs Ncor that selects each
-    cluster's medoid, and the IC-core floor below which a pattern has no comparable
-    Ncor at all (and therefore fails the gate by construction). It is NOT
-    ``rsat.lth.w`` -- RSAT discards that arm under ``-quick`` -- and it is NOT TomTom's
-    ``-min-overlap``, which stays pinned to modiscolite's parameter set. Three numbers
-    that happen to be 5; only these two are this one.
+    """Minimum comparable overlap, in columns, for the all-pairs Ncor that selects each
+    cluster's medoid (rule lexicon_medoid). It is NOT ``rsat.lth.w`` -- RSAT discards
+    that arm under ``-quick`` -- and it is NOT TomTom's ``-min-overlap``, which stays
+    pinned to modiscolite's parameter set. Naming does not read it.
     """
     return int(params(cfg)["w_th"])
-
-
-def gate(cfg: dict) -> tuple[float, float]:
-    g = params(cfg)["gate"]
-    missing = [k for k in ("qval", "ncor") if k not in g]
-    if missing:
-        raise NamingError(f"config.reference_lexicon.gate is missing {missing}; both arms are required")
-    return float(g["qval"]), float(g["ncor"])
 
 
 def rsat(cfg: dict) -> dict:
@@ -141,12 +121,8 @@ def rsat_argv(cfg: dict, union: str, out_prefix: str) -> list[str]:
 
 
 def naming_inputs(cfg: dict) -> list[str]:
-    """What every naming stage reads: the tagged target plus the untagged sources.
-
-    Both, because the stage measures two different things: TomTom runs against the
-    tagged copy, the Ncor arm of the gate runs against the untagged matrices.
-    """
-    return [CLTAGGED] + source_paths(cfg)
+    """What every naming stage reads: the source union, TomTom's target."""
+    return [UNION]
 
 
 def run_names(run: str) -> str:

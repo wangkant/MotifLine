@@ -55,6 +55,7 @@ PARAMETERS = (
               official_default_exists=False,
               note="-n is required by the CLI; there is no default to adopt"),
     Parameter("modisco.window", "modisco-lite", "--window"),
+    Parameter("modisco.n_leiden", "modisco-lite", "--n_leiden"),
     Parameter("finemo.mode", "finemo", "--mode"),
     Parameter("finemo.threshold", "finemo", "--cwm-trim-threshold",
               note="-t trims the CWM; it is not a hit score threshold"),
