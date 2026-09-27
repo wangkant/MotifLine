@@ -77,9 +77,10 @@ rule discover:
     input: rules.merge_shards.output
     output: "results/{run}/modisco/modisco.h5"
     params: m=config["modisco"]
+    threads: 32
     log: "results/{run}/modisco/modisco.log"
     shell:
-        "{ENV}/bin/modisco motifs -s {input[1]} -a {input[0]} -n {params.m[max_seqlets]} "
+        "OMP_NUM_THREADS={threads} NUMBA_NUM_THREADS={threads} {ENV}/bin/modisco motifs -s {input[1]} -a {input[0]} -n {params.m[max_seqlets]} "
         "-w {params.m[window]} -o {output} > {log} 2>&1"
 
 
