@@ -66,8 +66,10 @@ def thread_env(n):
 
 # Attribution: one shard per GPU at 8 threads was the measured optimum for AG.
 ATTR_THREADS = thread_env(8)
-# MoDISco (rule discover; the name is kept because it is in that rule's code).
-COMPUTE_THREADS = thread_env(8)
+# MoDISco (rule discover; the name is kept because it is in that rule's code). 32 gives a
+# byte-identical modisco.h5 to 8 (new_experiment/modisco_threads_2026-09-27).
+MODISCO_THREADS = 32
+COMPUTE_THREADS = thread_env(MODISCO_THREADS)
 
 
 def attr_width(run):
@@ -216,6 +218,7 @@ ATTR_FILES = ["results/{run}/attr/attr.npy", "results/{run}/attr/ohe.npy",
 rule discover:
     input: ATTR_FILES
     output: "results/{run}/modisco/modisco.h5"
+    threads: MODISCO_THREADS
     params: sig=param_sig(modisco=config["modisco"])
     run:
         attr_dir = f"results/{wildcards.run}/attr"
