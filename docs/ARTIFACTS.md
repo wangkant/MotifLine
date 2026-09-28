@@ -115,6 +115,20 @@ extent by trimming its CWM at `-t`, so two runs whose CWMs differ slightly emit
 the same hits at coordinates shifted by a base or two — compare hit sets with a
 ±2bp tolerance in mind, not by exact coordinates.
 
+## `modisco_report` → `modisco_report/`
+
+modiscolite's own `modisco report` on `modisco.h5`, matched against
+`lexicon_sources_union.meme` (the naming target), `-n`/`-l` at the CLI defaults.
+`motifs.html` plus the logo images it links to. Matches are the same TomTom line
+as `name_patterns`; the report shows library ids, the gene symbols are in
+`naming/pattern_names.tsv`.
+
+## `finemo_report` → `finemo_report/`
+
+`finemo report` on `finemo_regions/regions.npz`, `hits/` and `modisco.h5`, with
+`-W` = `modisco.window` (the window MoDISco ran on; the seqlet recall is wrong at
+any other width). `report.html` plus the tables and figures it links to.
+
 ## `lexicon_union` → `results/lexicon/`
 
 | file | contents |

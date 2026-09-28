@@ -1,7 +1,8 @@
 # Snakefile -- one line per run:
 #
-#     attribute (cbp | ag)  ->  discover  ->  extract_regions  ->  call_hits
+#     attribute (cbp | ag)  ->  discover  ->  extract_regions  ->  call_hits  ->  finemo_report
 #                                        \->  name_patterns  (TomTom vs lexicon_union)
+#                                        \->  modisco_report
 import json
 import os
 import sys
@@ -150,6 +151,10 @@ rule all:
         expand("results/{run}/hits/hits.tsv",
                run=active_runs(config, sorted(config["runs"]))),
         expand("results/{run}/naming/pattern_names.tsv",
+               run=active_runs(config, sorted(config["runs"]))),
+        expand("results/{run}/modisco_report/motifs.html",
+               run=active_runs(config, sorted(config["runs"]))),
+        expand("results/{run}/finemo_report/report.html",
                run=active_runs(config, sorted(config["runs"])))
 
 rule import_attr:
@@ -258,6 +263,38 @@ rule call_hits:
                 "-o", out, "-t", str(f["threshold"]), "-l", str(f["alpha"]),
                 "-b", str(f["batch"])]
         run_body(out, argv, "call_hits", sig=params.sig)
+
+rule modisco_report:
+    """modiscolite's own HTML report, matched against the union the names come from.
+    Its TomTom line is the one name_patterns copies, so the matches are the same; the
+    report shows library ids, the gene symbols are in naming/pattern_names.tsv.
+    -n (3 matches) and -l (off) are left at the CLI defaults."""
+    input: h5=rules.discover.output, lex=nm.UNION
+    output: "results/{run}/modisco_report/motifs.html"
+    params: sig=param_sig(target=nm.UNION)
+    run:
+        out = f"results/{wildcards.run}/modisco_report"
+        argv = [f"{ENV}/bin/modisco", "report", "-i", str(input.h5), "-o", out,
+                "-m", str(input.lex)]
+        # modiscolite shells out to `tomtom` by name; it lives in the meme env
+        tomtom_bin = Path(nm.params(config)["tomtom"]).parent
+        run_body(out, argv, "modisco_report", env={"PATH": f"{tomtom_bin}:{os.environ['PATH']}"},
+                 sig=params.sig)
+
+rule finemo_report:
+    """FiNeMo's own HTML report on the run's hits, with seqlet recall against modisco.h5.
+    -W must be the window MoDISco ran on, so it is read from modisco.window."""
+    input: npz=rules.extract_regions.output, hits=rules.call_hits.output, h5=rules.discover.output
+    output: "results/{run}/finemo_report/report.html"
+    params: sig=param_sig(window=config["modisco"]["window"])
+    run:
+        out = f"results/{wildcards.run}/finemo_report"
+        argv = [f"{ENV}/bin/finemo", "report",
+                "-r", f"results/{wildcards.run}/finemo_regions/regions.npz",
+                "-H", f"results/{wildcards.run}/hits",
+                "-m", f"results/{wildcards.run}/modisco/modisco.h5",
+                "-W", str(config["modisco"]["window"]), "-o", out]
+        run_body(out, argv, "finemo_report", sig=params.sig)
 
 rule lexicon_union:
     """Source libraries -> one union MEME, matrices untouched; built once, shared by every run."""
