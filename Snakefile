@@ -42,7 +42,9 @@ def attr_cmd(w):
 rule all:
     input:
         expand("results/{run}/hits/hits.tsv", run=RUNS),
-        expand("results/{run}/naming/pattern_names.tsv", run=RUNS)
+        expand("results/{run}/naming/pattern_names.tsv", run=RUNS),
+        expand("results/{run}/modisco_report/motifs.html", run=RUNS),
+        expand("results/{run}/finemo_report/report.html", run=RUNS)
 
 
 rule attribute:
@@ -102,6 +104,22 @@ rule call_hits:
         "CUDA_VISIBLE_DEVICES={GPUS[0]} {ENV}/bin/finemo call-hits -M {params.f[mode]} "
         "-r {input.npz} -m {input.h5} -o {params.out} -t {params.f[threshold]} "
         "-l {params.f[alpha]} -b {params.f[batch]}"
+
+
+rule modisco_report:
+    input: h5=rules.discover.output, lex=UNION
+    output: "results/{run}/modisco_report/motifs.html"
+    params: out="results/{run}/modisco_report", tomtom=Path(LEX["tomtom"]).parent
+    shell: "PATH={params.tomtom}:$PATH {ENV}/bin/modisco report -i {input.h5} -o {params.out} -m {input.lex}"
+
+
+rule finemo_report:
+    input: npz=rules.extract_regions.output, hits=rules.call_hits.output, h5=rules.discover.output
+    output: "results/{run}/finemo_report/report.html"
+    params: hits="results/{run}/hits", out="results/{run}/finemo_report"
+    shell:
+        "{ENV}/bin/finemo report -r {input.npz} -H {params.hits} -m {input.h5} "
+        "-W {config[modisco][window]} -o {params.out}"
 
 
 rule lexicon_union:
