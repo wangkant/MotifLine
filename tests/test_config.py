@@ -1,8 +1,6 @@
 """The config validator: every way a config can be wrong, named before the DAG runs."""
 from __future__ import annotations
 
-import textwrap
-
 import pytest
 import yaml
 
@@ -53,7 +51,6 @@ def test_missing_run_key_names_both_run_and_key():
 
 
 def test_misspelled_run_key_is_reported_not_ignored():
-    """`n_shard` would silently make a sharded run single-process."""
     c = cfg_cbp()
     c["runs"]["r1"]["n_shard"] = 4
     assert only(problems(c, paths=False), "n_shard")
@@ -72,7 +69,6 @@ def test_chrombpnet_src_not_required_when_every_run_is_adopted():
 
 
 def test_gpn_star_is_no_longer_a_model():
-    """The star line was removed; a config still declaring one must say so, not run."""
     c = cfg_cbp(runs={"s1": {"model": "star", "peaks": "p.bed",
                              "stride": 8, "source": "none"}})
     assert only(problems(c, paths=False), "'star' is not one of")
@@ -81,7 +77,7 @@ def test_gpn_star_is_no_longer_a_model():
 def test_a_computed_ag_run_declares_ag_src_in_its_own_entry():
     """attr_argv reads r["ag_src"]; a top-level key of that name is never read."""
     c = cfg_cbp(runs={"g1": {"model": "ag", "weights": "/m/w.pt", "peaks": "p.bed",
-                             "track": 0, "chunk": 100}})
+                             "track": 60, "biosample": "K562", "chunk": 100}})
     c["ag_src"] = "/m/alphagenome"
     p = problems(c, paths=False)
     assert only(p, "runs.g1.ag_src")
@@ -100,7 +96,6 @@ def test_empty_runs_is_reported():
 
 
 def test_shipped_example_config_matches_the_schema(tmp_path):
-    """config/example.yaml is what a new user copies; it has to be valid."""
     from pathlib import Path
     example = Path(__file__).resolve().parents[1] / "config" / "example.yaml"
     assert problems(load(example), paths=False) == []
@@ -171,7 +166,6 @@ def test_skeleton_is_valid_yaml_that_names_every_required_section():
 
 
 def test_a_cancelled_runs_vanished_archive_is_not_an_error(tmp_path):
-    """Cancelling a run is how a frozen stage tree is recorded; its inputs may be gone."""
     gone = str(tmp_path / "archive-that-was-deleted")
     active = cfg_cbp(runs={
         "dead": {"model": "cbp", "adopt_from": gone, "rows": 10,
@@ -187,3 +181,74 @@ def test_a_cancelled_run_is_still_checked_structurally(tmp_path):
     c = cfg_cbp(runs={"dead": {"model": "cbp", "cancelled": True,
                                "cancelled_note": "n.md", "adopt_from": "/x"}})
     assert only(problems(c, paths=True), "rows")
+
+
+def test_an_ag_run_must_name_the_biosample_of_its_track():
+    c = cfg_cbp(runs={"g1": {"model": "ag", "ag_src": "/a", "weights": "/m/w.pt",
+                             "peaks": "p.bed", "track": 60, "chunk": 100}})
+    assert only(problems(c, paths=False), "runs.g1.biosample")
+
+
+def test_unknown_keys_inside_a_section_are_reported():
+    c = cfg_cbp()
+    c["modisco"]["n_leidn"] = 2
+    assert only(problems(c, paths=False), "n_leidn")
+
+
+def test_head_and_n_shards_together_are_reported():
+    c = cfg_cbp()
+    c["runs"]["r1"].update(head=10, n_shards=2)
+    assert only(problems(c, paths=False), "head and n_shards")
+
+
+def test_n_shards_must_be_a_positive_integer():
+    c = cfg_cbp()
+    c["runs"]["r1"]["n_shards"] = 0
+    assert only(problems(c, paths=False), "n_shards: must be a positive integer")
+
+
+def _peaks_cfg(tmp_path, text, sizes="chr1\t1000000\n"):
+    peaks = tmp_path / "p.bed"
+    peaks.write_text(text)
+    cs = tmp_path / "hg38.chrom.sizes"
+    cs.write_text(sizes)
+    c = cfg_cbp()
+    c["genome"]["chrom_sizes"] = str(cs)
+    c["runs"]["r1"]["peaks"] = str(peaks)
+    return problems(c, paths=True)
+
+
+ROW = "chr1\t100\t200\tpk\t0\t.\t1.0\t-1\t-1\t{summit}\n"
+
+
+def test_every_peak_line_is_checked_not_only_the_first(tmp_path):
+    assert only(_peaks_cfg(tmp_path, ROW.format(summit=50) + "chr1\t100\t200\t150\n"), "line 2")
+
+
+def test_a_summit_outside_its_peak_is_reported(tmp_path):
+    assert only(_peaks_cfg(tmp_path, ROW.format(summit=150)), "outside the peak")
+
+
+def test_a_chromosome_missing_from_chrom_sizes_is_reported(tmp_path):
+    assert only(_peaks_cfg(tmp_path, ROW.format(summit=50).replace("chr1", "chrUn", 1)),
+                "'chrUn' is not in genome.chrom_sizes")
+
+
+def test_peaks_sharing_a_summit_are_reported(tmp_path):
+    text = ROW.format(summit=50) + "chr1\t120\t300\tpk2\t0\t.\t1.0\t-1\t-1\t30\n"
+    assert only(_peaks_cfg(tmp_path, text), "repeats an earlier peak")
+
+
+def test_a_header_line_is_reported(tmp_path):
+    assert only(_peaks_cfg(tmp_path, "track name=x\n" + ROW.format(summit=50)), "line 1")
+
+
+def test_rows_on_a_single_process_run_is_reported():
+    c = cfg_cbp()
+    c["runs"]["r1"]["rows"] = 100
+    assert only(problems(c, paths=False), "rows: only checked")
+
+
+def test_an_eleventh_column_other_than_true_is_reported(tmp_path):
+    assert only(_peaks_cfg(tmp_path, ROW.format(summit=50).replace("\n", "\tFalse\n")),
+                "column 11 must be True")

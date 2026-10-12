@@ -10,6 +10,7 @@ import pytest
 from motifline.merge_shards import merge_shards
 
 STEPS = Path(__file__).resolve().parents[1] / "src/motifline/steps"
+AG_ARGS = ["--ag_src", "a", "--weights", "w", "--track", "60", "--biosample", "K562"]
 
 
 def _load(name):
@@ -77,7 +78,7 @@ def test_head_and_shard_are_mutually_exclusive(step):
     argv = [sys.executable, str(STEPS / f"{step}.py"), "--peaks", "p", "--out_dir", "o",
             "--fasta", "f", "--chrom_sizes", "c", "--chrombpnet_src", "s",
             "--hypothetical", "--head", "10", "--shard_i", "0", "--n_shards", "4"]
-    argv += ["--wo_bias", "m"] if step == "attr_cbp" else ["--ag_src", "a", "--weights", "w"]
+    argv += ["--wo_bias", "m"] if step == "attr_cbp" else AG_ARGS
     r = subprocess.run(argv, capture_output=True, text=True)
     assert r.returncode != 0 and "mutually exclusive" in r.stderr
 
@@ -87,6 +88,14 @@ def test_shard_args_must_come_in_pairs(step):
     argv = [sys.executable, str(STEPS / f"{step}.py"), "--peaks", "p", "--out_dir", "o",
             "--fasta", "f", "--chrom_sizes", "c", "--chrombpnet_src", "s",
             "--hypothetical", "--shard_i", "0"]
-    argv += ["--wo_bias", "m"] if step == "attr_cbp" else ["--ag_src", "a", "--weights", "w"]
+    argv += ["--wo_bias", "m"] if step == "attr_cbp" else AG_ARGS
     r = subprocess.run(argv, capture_output=True, text=True)
     assert r.returncode != 0 and "must be given together" in r.stderr
+
+
+def test_a_short_merge_is_refused_before_anything_is_written(tmp_path):
+    a = np.zeros((2, 4, 6), np.float32)
+    _write_shard(tmp_path / "s0", 0, a, a.astype(np.int8), ["r1", "r2"])
+    with pytest.raises(ValueError, match="expected 3"):
+        merge_shards([tmp_path / "s0"], tmp_path / "merged", expected_rows=3)
+    assert not (tmp_path / "merged").exists()

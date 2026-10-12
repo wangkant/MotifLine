@@ -148,8 +148,31 @@ def test_check_states_that_the_parameters_are_the_tools_own_defaults(tmp_path, c
 
 @has_compute
 def test_a_deviating_parameter_is_reported_but_does_not_fail_the_check(tmp_path, capsys):
-    """Deviating on purpose is ordinary science; this is a report, not a refusal."""
     cfg = write_cfg(tmp_path, real_env_cfg(modisco_window=500))
     assert main(["check", "-c", str(cfg), "--no-paths"]) == 0
     out = capsys.readouterr().out
     assert "modisco.window" in out and "500" in out and "400" in out
+
+
+def test_arguments_after_a_double_dash_reach_snakemake(tmp_path, monkeypatch):
+    import motifline.cli as cli
+    (tmp_path / "Snakefile").write_text("")
+    cfg = write_cfg(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    seen = []
+
+    class Done:
+        returncode = 0
+
+    def fake_run(argv, **kw):
+        seen.append(argv)
+        return Done()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    assert main(["run", "-c", str(cfg), "--no-check", "-j", "2", "--", "--rerun-incomplete"]) == 0
+    assert "--rerun-incomplete" in seen[-1] and "--" not in seen[-1]
+
+
+def test_a_double_dash_outside_run_is_an_error(tmp_path):
+    with pytest.raises(SystemExit):
+        main(["check", "-c", str(write_cfg(tmp_path)), "--", "--unlock"])

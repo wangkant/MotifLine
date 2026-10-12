@@ -34,7 +34,6 @@ def test_a_planted_region_really_reads_as_the_motif():
 
 
 def test_attribution_is_hypothetical_shaped_nonzero_on_all_four_bases():
-    """The house check: frac(|attr| > 1e-9) is ~1.0 for hypothetical, ~0.25 for actual."""
     attr, _, _, _ = synthetic(n=20, width=200)
     assert (np.abs(attr) > 1e-9).mean() > 0.99
 

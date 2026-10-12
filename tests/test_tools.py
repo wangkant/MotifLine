@@ -1,7 +1,6 @@
 """Reading the official defaults off the installed tools, and comparing config to them."""
 from __future__ import annotations
 
-import pytest
 
 from conftest import COMPUTE, has_compute
 from motifline.tools import deviations, live_defaults, parse_help_defaults

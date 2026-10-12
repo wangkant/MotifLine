@@ -69,3 +69,12 @@ def test_record_embeds_the_versions_of_the_env_that_ran_the_stage(tmp_path):
     info = json.loads((tmp_path / "run_info.json").read_text())
     assert info["env"] == sys.prefix
     assert isinstance(info["tools"]["pytest"], str)
+
+
+def test_record_names_the_commit_of_the_model_code(tmp_path):
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[1]
+    record(tmp_path, stage="attribute", argv=["x"], code={"src": repo, "none": tmp_path})
+    code = json.loads((tmp_path / "run_info.json").read_text())["code"]
+    assert code["src"]["commit"] and len(code["src"]["commit"]) >= 40
+    assert code["none"]["commit"] is None

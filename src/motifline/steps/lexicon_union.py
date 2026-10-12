@@ -1,17 +1,13 @@
 #!/usr/bin/env python
-"""Concatenate the reference source libraries into ONE union MEME file, TomTom's target.
+"""Concatenate the reference MEME libraries into one TomTom target.
 
-Two edits, nothing else -- every matrix value is copied through verbatim:
-
-* ``MOTIF MA0004.1 Arnt`` -> ``MOTIF MA0004.1_Arnt``. JASPAR puts the gene symbol in a
-  third column; TomTom keys on a single id, and the two-token form would make the id
-  ambiguous against HOCOMOCO's single-token names.
-* ``letter-probability matrix: ...`` gains ``E= 0`` when it has no ``E=`` field. TomTom
-  ignores it; it is kept so the union stays byte-identical to the one the existing
-  names were made from.
+Matrices are copied verbatim. Two edits: JASPAR's `MOTIF MA0004.1 Arnt` becomes
+`MOTIF MA0004.1_Arnt` (TomTom reports only the first token), and a matrix line without
+an `E=` field gets `E= 0`.
 """
 import argparse
 import re
+from collections import Counter
 from pathlib import Path
 
 MEME_HEADER = ("MEME version 4\n\nALPHABET= ACGT\n\nstrands: + -\n\n"
@@ -19,13 +15,17 @@ MEME_HEADER = ("MEME version 4\n\nALPHABET= ACGT\n\nstrands: + -\n\n"
 
 
 def blocks(path):
-    """Every line from the first ``MOTIF`` on, with the two edits applied."""
     out, started = [], False
     for line in open(path):
         if line.startswith("MOTIF"):
             started = True
-            parts = line.rstrip("\n").split()
-            name = parts[1] if len(parts) == 2 else f"{parts[1]}_{parts[2]}"
+            parts = line.split()
+            if len(parts) == 2:
+                name = parts[1]
+            elif len(parts) == 3:
+                name = f"{parts[1]}_{parts[2]}"
+            else:
+                raise ValueError(f"{path}: unexpected MOTIF line {line.rstrip()!r}")
             line = f"MOTIF {name}\n"
         elif line.startswith("letter-probability") and not re.search(r"\bE=", line):
             line = line.rstrip("\n") + " E= 0\n"
@@ -37,7 +37,7 @@ def blocks(path):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--source", action="append", required=True,
-                   help="tag=path, repeatable; concatenated in the order given")
+                   help="tag=path, repeatable; concatenated in this order")
     p.add_argument("--out", required=True)
     a = p.parse_args()
 
@@ -47,12 +47,15 @@ def main():
         b = blocks(path)
         counts.append((tag, sum(l.startswith("MOTIF") for l in b)))
         lines += b
+    ids = [l.split()[1] for l in lines if l.startswith("MOTIF")]
+    dup = sorted(i for i, n in Counter(ids).items() if n > 1)
+    if dup:
+        raise SystemExit(f"duplicate motif ids across sources: {dup[:5]}")
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     with open(a.out, "w") as f:
         f.write(MEME_HEADER)
         f.writelines(lines)
-    total = sum(n for _, n in counts)
-    print(f"{a.out}: {total} motifs (" + ", ".join(f"{t} {n}" for t, n in counts) + ")")
+    print(f"{a.out}: {len(ids)} motifs (" + ", ".join(f"{t} {n}" for t, n in counts) + ")")
 
 
 if __name__ == "__main__":

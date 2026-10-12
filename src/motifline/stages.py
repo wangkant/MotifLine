@@ -1,8 +1,7 @@
-"""Run one stage body, then label the directory it finished in (``run_info.json``).
+"""Run one stage body, then write run_info.json into its directory.
 
-The label is written only after the body succeeded. ``checks`` are measurements on the
-finished output recorded in the label; they never fail the stage, and one that returns
-a ``warning`` gets it printed.
+run_info.json is removed before the body starts and written only after it succeeds.
+`checks` measure the finished output; they are recorded, never fatal.
 """
 from __future__ import annotations
 
@@ -11,15 +10,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-from motifline.provenance import PACKAGES, now, record
+from motifline.provenance import PACKAGES, RUN_INFO, now, record
 
 
 def run_body(out_dir, argv, *, stage: str, param_sig: str | None = None,
              env: dict | None = None, env_prefix: str | None = None,
-             packages: tuple[str, ...] = PACKAGES, checks=()) -> Path:
-    """Run one stage body and label its directory. Raises if the body fails."""
+             packages: tuple[str, ...] = PACKAGES, checks=(),
+             code: dict | None = None) -> Path:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / RUN_INFO).unlink(missing_ok=True)
     started = now()
     subprocess.run([str(a) for a in argv], check=True,
                    env={**os.environ, **env} if env else None)
@@ -35,4 +35,4 @@ def run_body(out_dir, argv, *, stage: str, param_sig: str | None = None,
 
     return record(out_dir, stage=stage, argv=argv, param_sig=param_sig,
                   started=started, env_prefix=env_prefix, packages=packages,
-                  checks=results or None)
+                  checks=results or None, code=code)

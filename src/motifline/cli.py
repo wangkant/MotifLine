@@ -1,9 +1,4 @@
-"""``motifline`` -- init, check, run, smoke.
-
-The pipeline is a Snakefile and ``snakemake`` drives it; ``run`` checks the config
-first and prints where the parameters differ from the installed tools' defaults.
-Snakemake's own rerun triggers apply (all of them, its default).
-"""
+"""motifline init | check | run | smoke. `run` checks the config, then calls snakemake."""
 from __future__ import annotations
 
 import argparse
@@ -19,7 +14,6 @@ DEFAULT_CONFIG = "config/default.yaml"
 
 
 def find_workflow(start=None) -> Path | None:
-    """The nearest enclosing directory holding a Snakefile, or None."""
     here = Path(start or Path.cwd()).resolve()
     for d in [here, *here.parents]:
         if (d / "Snakefile").is_file():
@@ -29,7 +23,6 @@ def find_workflow(start=None) -> Path | None:
 
 def snakemake_argv(targets, *, snakefile, jobs=None, gpus=None, dry_run=False,
                    configfile=None, extra=()) -> list[str]:
-    """The snakemake command line this pipeline must be driven with."""
     argv = [sys.executable, "-m", "snakemake", "--snakefile", str(snakefile),
             "--directory", str(Path(snakefile).parent)]
     if configfile:
@@ -42,19 +35,15 @@ def snakemake_argv(targets, *, snakefile, jobs=None, gpus=None, dry_run=False,
         argv += ["-n"]
     argv += list(extra)
     if targets:
-        # After `--` so that a target path is never parsed as a snakemake flag.
         argv += ["--", *targets]
     return argv
 
-
-# --- the official-configuration report -------------------------------------
 
 def compute_env(cfg) -> str | None:
     return ((cfg.get("envs") or {}).get("compute")) or None
 
 
 def deviation_lines(cfg) -> list[str]:
-    """How this config sits against the tools that will actually run it."""
     env = compute_env(cfg)
     if not env or not Path(env, "bin").is_dir():
         return [f"could not read the tools' defaults: envs.compute ({env}) is not a "
@@ -65,8 +54,6 @@ def deviation_lines(cfg) -> list[str]:
         return [f"could not read the tools' defaults from {env}: {type(e).__name__}: {e}"]
     return render_deviations(deviations(cfg, live))
 
-
-# --- subcommands -----------------------------------------------------------
 
 def cmd_init(args) -> int:
     out = Path(args.config)
@@ -85,8 +72,7 @@ def cmd_check(args) -> int:
     except ConfigError as e:
         print(str(e), file=sys.stderr)
         return 1
-    base = Path(args.config).resolve().parent.parent
-    found = problems(cfg, paths=not args.no_paths, base=base)
+    found = problems(cfg, paths=not args.no_paths, base=find_workflow() or Path.cwd())
     if found:
         scope = "structure" if args.no_paths else "structure and paths"
         print(f"{len(found)} problem(s) in {args.config} ({scope}):", file=sys.stderr)
@@ -114,8 +100,7 @@ def cmd_run(args) -> int:
               file=sys.stderr)
         return 1
     try:
-        check_config(load(configfile), paths=not args.no_check,
-                     base=Path(configfile).resolve().parent.parent)
+        check_config(load(configfile), paths=not args.no_check, base=workflow)
     except ConfigError as e:
         print(str(e), file=sys.stderr)
         print("\nrefusing to build the DAG on a config that cannot run; "
@@ -136,8 +121,6 @@ def cmd_smoke(args) -> int:
                      keep=args.keep)
 
 
-# --- parser ----------------------------------------------------------------
-
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="motifline",
@@ -157,7 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
                      help="check structure only; do not touch the filesystem")
     chk.set_defaults(fn=cmd_check)
 
-    run = sub.add_parser("run", help="drive the pipeline with the required flags")
+    run = sub.add_parser("run", help="check the config, then run snakemake; arguments after -- go to snakemake")
     run.add_argument("targets", nargs="*", help="snakemake targets (default: rule all)")
     run.add_argument("-c", "--config", default=None)
     run.add_argument("-j", "--jobs", type=int, default=None)
@@ -166,8 +149,6 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("-n", "--dry-run", action="store_true")
     run.add_argument("--no-check", action="store_true",
                      help="skip the path checks before building the DAG")
-    run.add_argument("extra", nargs=argparse.REMAINDER,
-                     help="everything after -- goes to snakemake")
     run.set_defaults(fn=cmd_run)
 
     smoke = sub.add_parser(
@@ -183,11 +164,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    # Handled before parsing so that `motifline --version` needs no subcommand.
+    extra = []
+    if "--" in argv:
+        i = argv.index("--")
+        argv, extra = argv[:i], argv[i + 1:]
     if {"--version", "-V"} & set(argv):
         print(f"motifline {__version__}")
         return 0
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if extra and args.cmd != "run":
+        parser.error("arguments after -- are only passed on by `motifline run`")
+    args.extra = extra
     return args.fn(args)
 
 

@@ -1,8 +1,4 @@
-"""Where config differs from the defaults the installed tools print.
-
-Both tools print ``(default: X)`` in ``--help``, so the defaults are read from the binary
-that is going to run. A deviation is reported, never blocked.
-"""
+"""Report where config differs from the defaults printed by the installed tools' --help."""
 from __future__ import annotations
 
 import ast
@@ -12,7 +8,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-#: How each tool's help is reached.
 TOOLS = {
     "modisco-lite": {"argv": ["modisco", "motifs", "--help"]},
     "finemo": {"argv": ["finemo", "call-hits", "--help"]},
@@ -21,17 +16,13 @@ TOOLS = {
 
 @dataclass(frozen=True)
 class Parameter:
-    """One config key, and the tool flag its value actually reaches."""
     key: str
     tool: str
     flag: str
-    #: False for a flag the CLI requires, which therefore has no default to deviate from.
     official_default_exists: bool = True
     note: str = ""
 
 
-#: Every scientific parameter this pipeline sets on a tool. The mapping is not always
-#: guessable from the config key, and two of them are actively misleading.
 PARAMETERS = (
     Parameter("modisco.max_seqlets", "modisco-lite", "--max_seqlets",
               official_default_exists=False,
@@ -61,12 +52,8 @@ def _value(text: str):
 
 
 def parse_help_defaults(help_text: str) -> dict:
-    """``{long-flag-name: default}`` for every option whose help states a default.
-
-    argparse wraps, so ``(default:`` and its value routinely land on different lines;
-    the blocks are rejoined before the default is read. Options with no stated default
-    are absent rather than ``None`` — ``None`` is itself a default argparse prints.
-    """
+    """{long-flag: default} for options whose help states one. Wrapped option
+    blocks are rejoined first; options without a stated default are left out."""
     lines = help_text.splitlines()
     blocks, current = [], None
     for line in lines:
@@ -97,7 +84,6 @@ def parse_help_defaults(help_text: str) -> dict:
 
 @lru_cache(maxsize=None)
 def live_defaults(tool: str, env_prefix: str) -> dict:
-    """The defaults the installed tool prints, read from the binary that will run."""
     argv = TOOLS[tool]["argv"]
     exe = Path(env_prefix) / "bin" / argv[0]
     done = subprocess.run([str(exe), *argv[1:]], capture_output=True, text=True,
@@ -121,7 +107,6 @@ class Deviation:
 
 
 def deviations(cfg: dict, live: dict) -> list[Deviation]:
-    """Where config differs from ``live``, ``{tool: {flag-name: default}}``."""
     out: list[Deviation] = []
     for p in PARAMETERS:
         section, key = p.key.split(".")
@@ -135,7 +120,6 @@ def deviations(cfg: dict, live: dict) -> list[Deviation]:
 
 
 def render_deviations(rows) -> list[str]:
-    """The deviation report as lines; never empty, so silence cannot read as unchecked."""
     if not rows:
         return ["every parameter this pipeline sets is on its tool's official default"]
     return ([f"{len(rows)} parameter(s) deviate from the tool's default:"]

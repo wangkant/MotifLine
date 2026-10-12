@@ -22,7 +22,6 @@ def test_a_finished_stage_is_labelled_with_run_info(tmp_path):
 
 
 def test_a_failed_stage_leaves_no_run_info_behind(tmp_path):
-    """run_info.json present must mean the stage finished, or it is worse than nothing."""
     with pytest.raises(subprocess.CalledProcessError):
         run_body(tmp_path, ["false"], stage="discover")
     assert not (tmp_path / "run_info.json").exists()
@@ -72,7 +71,6 @@ def test_a_check_runs_after_the_body_and_lands_in_the_label(tmp_path):
 
 
 def test_a_check_that_raises_is_recorded_and_does_not_lose_the_stage(tmp_path):
-    """A finished attribution costs GPU-days; its own label must not be able to kill it."""
     def broken(out_dir):
         raise RuntimeError("probe exploded")
     run_body(tmp_path, ["true"], stage="attribute", checks=(broken,))
@@ -90,3 +88,10 @@ def test_a_checks_warning_is_printed_to_stderr(tmp_path, capfd):
         return {"warning": "this array does not look hypothetical"}
     run_body(tmp_path, ["true"], stage="attribute", checks=(warns,))
     assert "does not look hypothetical" in capfd.readouterr().err
+
+
+def test_a_failed_rerun_removes_the_old_label(tmp_path):
+    run_body(tmp_path, ["true"], stage="discover")
+    with pytest.raises(subprocess.CalledProcessError):
+        run_body(tmp_path, ["false"], stage="discover")
+    assert not (tmp_path / "run_info.json").exists()

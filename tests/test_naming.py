@@ -1,14 +1,9 @@
-"""The naming chain's load-bearing claims, each testable in isolation.
-
-Not a unit-test suite for its own sake: every case here is a way the chain has been
-seen to fail silently, or a parameter whose value is a decision rather than a default.
-"""
+"""Naming: the union MEME, TomTom's command line, gene symbols, the query trim."""
 import importlib.util
 import json
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from motifline import naming as nm
@@ -53,13 +48,11 @@ letter-probability matrix: alength= 4 w= 1 nsites= 20 E= 0
 
 
 def test_union_adds_the_E_field_hocomoco_omits(tmp_path):
-    """The union is kept byte-identical to the one the existing names came from."""
     p = tmp_path / "h14.meme"
     p.write_text(HOCOMOCO_STYLE)
     lines = union_step.blocks(p)
     matrix_line = next(l for l in lines if l.startswith("letter-probability"))
     assert matrix_line.rstrip("\n").endswith("E= 0")
-    # and the probabilities are copied through, not reformatted
     assert "0.1754735792622134\t0.3060817547357926\t0.390827517447657\t0.127617148554337\n" in lines
 
 
@@ -120,3 +113,10 @@ def test_modisco_trim_is_the_thirty_percent_of_max_span():
     cwm[3] = [0.5, 0, 0, 0]
     trimmed, start, end = name_step.modisco_trim(ppm, cwm, threshold=0.3)
     assert (start, end) == (1, 4) and len(trimmed) == 3
+
+
+def test_union_refuses_a_motif_line_it_cannot_turn_into_one_id(tmp_path):
+    p = tmp_path / "odd.meme"
+    p.write_text(JASPAR_STYLE.replace("MOTIF MA0004.1 Arnt", "MOTIF MA0004.1 Arnt extra"))
+    with pytest.raises(ValueError, match="unexpected MOTIF line"):
+        union_step.blocks(p)

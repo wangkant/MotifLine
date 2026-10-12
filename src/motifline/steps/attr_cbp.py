@@ -1,14 +1,11 @@
 #!/usr/bin/env python
-"""ChromBPNet DeepSHAP attribution step (compute layer, runs in chrombpnet_local py3.10).
+"""ChromBPNet DeepLIFT/SHAP hypothetical attributions (counts head).
 
-Line-for-line the math of region_v3/k562/shap_shard.py, single-process:
-same model construction, get_seq, masks and _deep_lift_shap call, so its
-output is directly comparable to the archived attr.npy. stdlib+numpy+torch+
-chrombpnet only -- this file must never import motifline.
+Uses chrombpnet-pytorch's own _deep_lift_shap. A peak whose window contains a non-ACGT
+base is dropped. Sharded runs split the peak list into contiguous slices before that
+filter and write attr_<i>.npy / ohe_<i>.npy / regions_<i>.bed.
 
-Full-scale runs shard the peak list (--shard_i/--n_shards, same linspace bounds
-as the archive) and write ``attr_<i>.npy``/``ohe_<i>.npy``/``regions_<i>.bed``;
-``motifline.merge_shards`` concatenates them back in shard order.
+Runs in the compute env and must not import motifline.
 """
 import argparse
 import os
@@ -17,68 +14,43 @@ import sys
 
 def parse_args():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--chrombpnet_src", required=True, help="path to chrombpnet-pytorch checkout")
+    ap.add_argument("--chrombpnet_src", required=True, help="chrombpnet-pytorch checkout")
     ap.add_argument("--wo_bias", required=True)
     ap.add_argument("--peaks", required=True)
     ap.add_argument("--out_dir", required=True)
     ap.add_argument("--fasta", required=True)
     ap.add_argument("--chrom_sizes", required=True)
     ap.add_argument("--task", default="counts", choices=["counts", "profile"])
-    ap.add_argument("--hypothetical", action="store_true",
-                    help="REQUIRED; projected scores are silently mixable with hypothetical ones")
+    ap.add_argument("--hypothetical", action="store_true", help="required")
     ap.add_argument("--batch_size", type=int, default=32)
     ap.add_argument("--in_window", type=int, default=2114)
     ap.add_argument("--random_state", type=int, default=42)
-    ap.add_argument("--n_shuffles", type=int, default=20,
-                   help="dinucleotide-shuffled references per region; stated rather "
-                        "than inherited from chrombpnet's signature, which the AG side "
-                        "already states in config")
-    ap.add_argument("--head", type=int, default=None, help="take only the first N peaks (slice runs)")
-    ap.add_argument("--n_shards", type=int, default=None,
-                    help="split the peak list into N contiguous shards (full-scale runs)")
-    ap.add_argument("--shard_i", type=int, default=None, help="index of the shard to compute, 0-based")
+    ap.add_argument("--n_shuffles", type=int, default=20)
+    ap.add_argument("--head", type=int, default=None, help="first N peaks only")
+    ap.add_argument("--n_shards", type=int, default=None)
+    ap.add_argument("--shard_i", type=int, default=None)
     a = ap.parse_args()
     if not a.hypothetical:
-        ap.error("--hypothetical is required: without it this step writes PROJECTED "
-                 "scores under the same filenames and shapes, which every stage "
-                 "downstream consumes without complaint (attr_ag.py refuses the same "
-                 "way). Measure a finished array with frac(|attr| > 1e-9): ~1.0 is "
-                 "hypothetical, ~0.25 is projected.")
+        ap.error("--hypothetical is required; without it the step would write projected "
+                 "scores under the same file names")
     if (a.shard_i is None) != (a.n_shards is None):
         ap.error("--shard_i and --n_shards must be given together")
     if a.n_shards is not None:
         if a.head is not None:
-            ap.error("--head and --shard_i/--n_shards are mutually exclusive: a head-slice of a "
-                     "shard is neither the slice nor the shard, and the merged output would be "
-                     "silently short")
+            ap.error("--head and --shard_i/--n_shards are mutually exclusive")
         if not 0 <= a.shard_i < a.n_shards:
             ap.error(f"--shard_i must be in [0, {a.n_shards})")
     return a
 
 
 def shard_bounds(n_rows, n_shards):
-    """Contiguous shard boundaries, verbatim from region_v3/k562/shap_shard.py:52-56.
-
-    ``np.linspace(0, N, n_shards+1).astype(int)`` is what produced the archived
-    shards, so keeping it (rather than a ceil-divide that looks equivalent) keeps
-    shard i covering exactly the rows it covered then.
-    """
     import numpy as np
     return np.linspace(0, n_rows, n_shards + 1).astype(int)
 
 
 def normalize_peaks_bed(peaks_path, out_dir):
-    """Hand ``load_region_df`` the 10-column narrowPeak form it expects.
-
-    The archived region_v3 ``peaks.bed`` is chrombpnet's *output* regions bed:
-    10 narrowPeak columns plus the ``is_peak`` column that ``load_region_df``
-    itself appends (``data_utils.py:238``), so feeding it back verbatim gives
-    12 columns against 11 names and dies. Dropping that trailing column and
-    letting ``load_region_df`` re-add ``is_peak=True`` is identity, which is
-    only true while every value is True -- anything else is refused rather
-    than silently coerced. Files with <=10 columns are passed through
-    untouched. Row order and row count are never changed here.
-    """
+    """load_region_df wants 10 columns and appends is_peak itself. An 11-column bed
+    whose last column is all True is cut back to 10; anything else is refused."""
     with open(peaks_path) as fh:
         lines = [ln.rstrip("\n") for ln in fh if ln.strip()]
     widths = {ln.count("\t") + 1 for ln in lines}
@@ -118,22 +90,21 @@ def main():
         p.requires_grad = False
     model = CountWrapper(model) if a.task == "counts" else ProfileWrapper(model)
 
-    # in_window is passed explicitly: load_region_df drops regions whose summit is
-    # within flank_length = in_window//2 of a chromosome end, and left to its own
-    # default it filters at 2114 regardless of what get_seq below then fetches. At a
-    # wider window that lets a too-close peak through to a truncated pyfaidx slice.
+    # in_window is passed so the edge filter matches the window get_seq fetches.
     regions_df = load_region_df(normalize_peaks_bed(a.peaks, a.out_dir),
                                 chrom_sizes=a.chrom_sizes, in_window=a.in_window)
+    center = regions_df["chr"] + ":" + (regions_df["start"] + regions_df["summit"]).astype(str)
+    if center.duplicated().any():
+        raise SystemExit(f"{a.peaks}: {int(center.duplicated().sum())} peaks share a summit "
+                         f"with an earlier peak")
+    n_in = len(regions_df)
     suffix = ""
     if a.n_shards is not None:
-        # Shard BEFORE the N-base masks, exactly as shap_shard.py did: the masks drop
-        # different rows in different shards, so slicing after them would make the shard
-        # bounds depend on sequence content and the concatenation no longer be the whole.
         bounds = shard_bounds(len(regions_df), a.n_shards)
         lo, hi = int(bounds[a.shard_i]), int(bounds[a.shard_i + 1])
         regions_df = regions_df.iloc[lo:hi].reset_index(drop=True)
         suffix = f"_{a.shard_i}"
-        print(f"[shard {a.shard_i}/{a.n_shards}] rows [{lo}:{hi}] = {len(regions_df)} peaks", flush=True)
+        print(f"[shard {a.shard_i}/{a.n_shards}] rows [{lo}:{hi}]", flush=True)
     if a.head:
         regions_df = regions_df.iloc[: a.head].reset_index(drop=True)
     seq = get_seq(regions_df, pyfaidx.Fasta(a.fasta), a.in_window)
@@ -141,12 +112,12 @@ def main():
         seq = torch.tensor(seq.astype(np.float32))
     if seq.shape[-1] == 4:
         seq = seq.permute(0, 2, 1)
-    keep = ~((seq == 0.25).any(dim=(1, 2)))
-    seq = seq[keep]
-    regions_df = regions_df.iloc[keep.numpy()].reset_index(drop=True)
+    # get_seq encodes non-ACGT bases as all-zero columns
     keep = ~((seq == 0).all(dim=1).any(dim=1))
     seq = seq[keep]
     regions_df = regions_df.iloc[keep.numpy()].reset_index(drop=True)
+    print(f"[attr_cbp] {len(regions_df)} peaks ({n_in} in bounds); "
+          f"{int((~keep).sum())} dropped for non-ACGT bases", flush=True)
 
     attr = _deep_lift_shap(model.to("cuda"), seq, batch_size=a.batch_size, verbose=True,
                            args=None, warning_threshold=1e8, device="cuda",

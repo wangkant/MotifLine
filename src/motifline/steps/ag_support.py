@@ -1,29 +1,16 @@
 #!/usr/bin/env python
-"""AlphaGenome DeepLIFT support symbols.
+"""AlphaGenome DeepLIFT helpers for attr_ag.py.
 
-``AlphaGenomeWrapper`` and ``_ag_nonlinear_ops`` derive from, and modify, Ruchir
-Rastogi's ``examples/notebooks/deeplift.ipynb`` (rastogiruchir/alphagenome-pytorch,
-branch deeplift-support), Apache-2.0; licence text at licenses/Apache-2.0.txt. Changed:
-the wrapper is reformatted, the op table became a function of two booleans, and the
-notebook's ``uncached_nonlinear_ops`` is dropped because stock tangermeme 1.0.4 does not
-take it. ``ag_seqs_centered`` and ``load_peaks`` are not his.
+AlphaGenomeWrapper and _ag_nonlinear_ops are adapted from Ruchir Rastogi's
+examples/notebooks/deeplift.ipynb (rastogiruchir/alphagenome-pytorch, branch
+deeplift-support, Apache-2.0; licence in licenses/Apache-2.0.txt). Changes: the wrapper
+is reformatted, the op table is a function of two flags, and the notebook's
+uncached_nonlinear_ops is dropped because tangermeme 1.0.4 does not accept it.
+The sequence and peak helpers are not from the notebook.
 
-The table has to be complete: tangermeme registers no hook for a module type it has
-no rule for and says nothing, so a missing nonlinearity is silently given ordinary
-gradients. Measured over AlphaGenome's 639 modules at 64e9b75, everything left
-uncovered is linear or structural.
-
-They live here rather than being imported from the validation script, because that tree
-is read-only and must never be on motifline's import path: the pipeline has to keep
-working when it is gone, and an import would silently re-bind the pipeline's math to a
-file nobody is versioning.
-
-This module is part of the COMPUTE layer (chrombpnet_local, py3.10): it must never import
-motifline. It also does no sys.path manipulation of its own -- the caller
-(attr_ag.py) puts the alphagenome-pytorch-deeplift and chrombpnet-pytorch checkouts on
-sys.path before importing this module, so the site paths stay in config, not in code.
+The op table must cover every nonlinear module: tangermeme gives a module without a
+rule plain gradients and does not warn. At 64e9b75 everything uncovered is linear.
 """
-import numpy as np  # noqa: F401  (kept for parity with the source module's namespace)
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -36,22 +23,21 @@ from tangermeme.deep_lift_shap import _nonlinear
 from chrombpnet.data_utils import read_chrom_sizes
 
 
-# --------------------------- AlphaGenome wrapper ---------------------------
 class AlphaGenomeWrapper(nn.Module):
-    """Scalar = log1p(sum of central `target_length` bp of one ATAC track at `resolution`)."""
+    """log1p(sum over the central `target_length` bp of one track)."""
     def __init__(self, model, modality, track_idx, target_length, resolution=1, organism_idx=0):
         super().__init__()
         self.model = model; self.modality = modality; self.track_idx = track_idx
         self.target_length = target_length; self.resolution = resolution
         self.organism_idx = organism_idx; self.log1p = layers.Log1p()
 
-    def forward(self, x):                          # x: (N, 4, L)
-        x = x.transpose(1, 2)                      # (N, L, 4)
+    def forward(self, x):                          # (N, 4, L)
+        x = x.transpose(1, 2)
         org = torch.full((x.shape[0],), self.organism_idx, dtype=torch.long, device=x.device)
         out = self.model(x, org, heads=(self.modality,), resolutions=(self.resolution,), channels_last=True)
-        sig = out[self.modality][self.resolution][:, :, self.track_idx]   # (N, L)
+        sig = out[self.modality][self.resolution][:, :, self.track_idx]
         cs = sig.shape[1] // 2 - self.target_length // 2
-        sig = sig[:, cs:cs + self.target_length].sum(dim=1)              # (N,)
+        sig = sig[:, cs:cs + self.target_length].sum(dim=1)
         return self.log1p(sig).unsqueeze(1)
 
 
@@ -69,26 +55,27 @@ def _ag_nonlinear_ops(use_log_ratio_softmax=True, use_log_ratio_layernorm=False)
     }
 
 
-# --------------------------- sequence loading ---------------------------
-def ag_seqs_centered(df, fasta, L):
-    """One-hot (N,4,L) centered on (start + summit), matching CBP's get_seq centering."""
-    out = []
-    for _, r in df.iterrows():
-        c = int(r["start"]) + int(r["summit"])
-        seq = fasta[f"chr{str(r['chr']).replace('chr','')}"][c - L // 2:c + L // 2].seq
-        out.append(sequence_to_onehot_tensor(seq).T)        # (4, L)
-    return torch.stack(out)
+def window_seq(fasta, chrom, center, L):
+    """L bp centred on `center`, the same centring as chrombpnet's get_seq."""
+    return fasta[f"chr{str(chrom).replace('chr', '')}"][center - L // 2:center + L // 2].seq
+
+
+def onehot(seq):
+    """(4, L); non-ACGT bases are all-zero columns."""
+    return sequence_to_onehot_tensor(seq).T
 
 
 def load_peaks(peaks_bed, chrom_sizes_path, in_window):
-    """Build chr/start/end/summit df from region_v3 peaks.bed (cols: chr,start,end,name,score,
-    strand,signal,p,q,summit,is_peak); keep only rows whose (start+summit)+/-in_window//2 is in-bounds."""
+    """chr/start/end/summit of every peak whose window fits on its chromosome."""
     raw = pd.read_csv(peaks_bed, sep="\t", header=None)
     df = pd.DataFrame({"chr": raw[0].astype(str), "start": raw[1].astype(int),
                        "end": raw[2].astype(int), "summit": raw[9].astype(int)})
     cs = read_chrom_sizes(chrom_sizes_path)
+    unknown = sorted(set(df["chr"]) - set(cs))
+    if unknown:
+        raise SystemExit(f"{peaks_bed}: chromosomes not in {chrom_sizes_path}: {unknown[:5]}")
     flank = in_window // 2
     center = df["start"] + df["summit"]
-    size = df["chr"].map(lambda c: int(cs.get(c, 0)))
+    size = df["chr"].map(lambda c: int(cs[c]))
     keep = (center - flank > 0) & (center + flank <= size)
     return df[keep].reset_index(drop=True)

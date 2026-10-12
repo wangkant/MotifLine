@@ -1,30 +1,9 @@
 #!/usr/bin/env python
-"""MoDISco patterns -> names, through TomTom against the source union.
+"""Name MoDISco patterns by TomTom against the reference union.
 
-The naming chain, in one stage:
-
-    modisco.h5  --modiscolite trim-->  query.meme
-                --TomTom vs lexicon_sources_union.meme-->  top 3 library matches
-                --gene symbol of the first match's TF-->  name
-
-The library id stays in ``match0..2``; ``tf0..2`` and ``name`` are HGNC gene symbols.
-A HOCOMOCO id's prefix is the UniProt entry name (``TYY1.H14CORE...`` is YY1), so its
-symbol is read from HOCOMOCO's own annotation; a JASPAR id carries the symbol after
-``_``, upper-cased so mouse-derived entries (``Banp``) read as the human gene.
-
-Nothing is gated: every pattern is named after its first match whatever its q-value,
-and the q-value is reported beside it.
-
-Two details that are load-bearing:
-
-1. **The query trim is modiscolite's**, not ours: ``score = sum(|CWM|, axis=1)``, keep
-   the span between the first and last column at or above 30% of the max, and cut the
-   PPM there (modiscolite ``report.py``). The CWM used is ``contrib_scores`` -- what
-   modiscolite's own report trims on -- even when the attributions fed to MoDISco were
-   hypothetical. Changing it would change the query and so the match.
-2. **``-mi 1`` is deliberately absent** from the TomTom command line. modiscolite passes
-   it because it writes one motif per temporary file; against a batch query file it
-   silently queries only the first motif and returns nothing for the rest.
+Each pattern is trimmed as in modiscolite's report (|CWM| >= 30% of max), queried
+against the union, and named after the gene symbol of its best match. There is no
+q-value gate; q-values are reported next to the name.
 """
 import argparse
 import hashlib
@@ -44,7 +23,6 @@ GROUPS = ("pos_patterns", "neg_patterns")
 
 
 def _digest(path):
-    """sha256 of the target library, so a rebuilt lexicon cannot be silently reused."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
@@ -52,21 +30,7 @@ def _digest(path):
     return h.hexdigest()
 
 
-def _complete(tsv):
-    """TomTom closes its TSV with a '# Tomtom ... Version' comment block.
-
-    A run killed mid-write leaves a file that `pd.read_csv(comment='#')` parses happily
-    and that yields fewer matches than it should, so completeness is checked, not
-    assumed."""
-    try:
-        tail = open(tsv, "rb").read()[-4096:].decode("utf-8", "replace")
-    except OSError:
-        return False
-    return any(l.startswith("# Tomtom") for l in tail.splitlines())
-
-
 def modisco_trim(ppm, cwm, threshold=0.3):
-    """modiscolite report.py's trim: |CWM| row sums at >= 30% of max bound the PPM."""
     score = np.abs(cwm).sum(1)
     keep = np.where(score >= score.max() * threshold)[0]
     if len(keep) == 0:
@@ -75,9 +39,8 @@ def modisco_trim(ppm, cwm, threshold=0.3):
 
 
 def patterns_of(h5_path):
-    """Every pattern in the file, pos then neg, in numeric index order."""
     out = []
-    with h5py.File(h5_path) as f:
+    with h5py.File(h5_path, "r") as f:
         for group in GROUPS:
             if group not in f:
                 continue
@@ -91,19 +54,14 @@ def patterns_of(h5_path):
 
 
 def tomtom_argv(tomtom, query, target, out_dir):
-    """modiscolite report.py's TomTom line, minus ``-mi 1``.
-
-    ``-mi 1`` means "query only motif number 1". modiscolite can pass it because it
-    writes one motif per temporary file; here the query file holds every pattern, so
-    it would return matches for the first and silence for the rest.
-    """
+    # modiscolite's TomTom line without -mi 1: it queries one motif per file, we
+    # query all patterns in one file, and -mi 1 would keep only the first.
     return [tomtom, "-no-ssc", "-oc", str(out_dir), "-verbosity", "1",
             "-min-overlap", "5", "-dist", "pearson", "-evalue", "-thresh", "10.0",
             str(query), str(target)]
 
 
 def h14_symbols(annotation_jsonl):
-    """``{H14 id: HUMAN gene symbol}`` from HOCOMOCO's ``H14CORE_annotation.jsonl``."""
     out = {}
     for line in open(annotation_jsonl):
         if line.strip():
@@ -113,9 +71,8 @@ def h14_symbols(annotation_jsonl):
 
 
 def tf_name(motif_id, h14):
-    """Gene symbol of a union id. HOCOMOCO: TYY1.H14CORE.0.P.B -> YY1 (via ``h14``);
-    JASPAR: MA0140.3_GATA1::TAL1 -> GATA1::TAL1, MA2503.1_Banp -> BANP.
-    An id that is neither raises KeyError."""
+    """HOCOMOCO ids go through the H14 annotation (TYY1.H14CORE... -> YY1). JASPAR ids
+    keep the name after '_', upper-cased; that is not always an HGNC symbol."""
     s = str(motif_id)
     if not s:
         return ""
@@ -128,7 +85,6 @@ def tf_name(motif_id, h14):
 
 
 def _top(tsv, n=3):
-    """``{query: [[target, p, q, overlap], ...]}``, best q first, ties broken by p."""
     t = pd.read_csv(tsv, sep="\t", comment="#").dropna(subset=["Query_ID"])
     t = t.sort_values(["Query_ID", "q-value", "p-value"])
     cols = ["Target_ID", "p-value", "q-value", "Overlap"]
@@ -138,8 +94,8 @@ def _top(tsv, n=3):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--h5", action="append", required=True, help="label=modisco.h5, repeatable")
-    p.add_argument("--target", required=True, help="lexicon_sources_union.meme")
-    p.add_argument("--h14_annotation", required=True, help="H14CORE_annotation.jsonl")
+    p.add_argument("--target", required=True)
+    p.add_argument("--h14_annotation", required=True)
     p.add_argument("--tomtom", required=True)
     p.add_argument("--out_dir", required=True)
     a = p.parse_args()
@@ -149,7 +105,6 @@ def main():
     leaves = [s.split("=", 1) for s in a.h5]
     h14 = h14_symbols(a.h14_annotation)
 
-    # ---- 1. query MEME per leaf, on modiscolite's trim ----
     pats = {}
     for label, h5 in leaves:
         pats[label] = patterns_of(h5)
@@ -161,27 +116,17 @@ def main():
                           f"w= {len(trimmed)}\n"
                           + "\n".join(" ".join(f"{v:.6f}" for v in row) for row in trimmed) + "\n")
         (out / f"{label}_query.meme").write_text(MEME_HEADER + "\n".join(blocks))
-        print(f"{label}: {len(pats[label])} patterns, trimmed width median "
-              f"{np.median([len(r['trim']) for r in pats[label]]):.0f}", flush=True)
+        print(f"{label}: {len(pats[label])} patterns", flush=True)
 
-    # ---- 2. TomTom against the union (batch query: NO -mi 1) ----
-    target_key = _digest(a.target)
+    # TomTom always reruns: a cached result would be joined by pattern key to a
+    # modisco.h5 whose pattern_N may no longer be the same motif.
     for label, _ in leaves:
         d = out / f"tomtom_{label}"
-        stamp = d / "target.sha256"
-        # Reuse only a complete run against the same library: tomtom.tsv is not a rule
-        # output, so snakemake never removes a stale or truncated one.
-        usable = (d / "tomtom.tsv").exists() and _complete(d / "tomtom.tsv") \
-            and stamp.exists() and stamp.read_text().strip() == target_key
-        if not usable:
-            if d.exists():
-                shutil.rmtree(d)
-            subprocess.run(tomtom_argv(a.tomtom, out / f"{label}_query.meme", a.target, d),
-                           check=True)
-            stamp.write_text(target_key + "\n")
-        print(f"  tomtom {label} done", flush=True)
+        if d.exists():
+            shutil.rmtree(d)
+        subprocess.run(tomtom_argv(a.tomtom, out / f"{label}_query.meme", a.target, d),
+                       check=True)
 
-    # ---- 3. assemble: name = gene symbol of the first match, no gate ----
     rows = []
     for label, _ in leaves:
         hits = _top(out / f"tomtom_{label}" / "tomtom.tsv")
@@ -200,17 +145,11 @@ def main():
             rec["name"] = rec["tf0"]
             rows.append(rec)
     df = pd.DataFrame(rows)
-    # Which library produced these names, on the table itself.
     df["target"] = Path(a.target).name
-    df["target_sha256"] = target_key[:12]
+    df["target_sha256"] = _digest(a.target)[:12]
     df["h14_annotation_sha256"] = _digest(a.h14_annotation)[:12]
     df.to_csv(out / "pattern_names.tsv", sep="\t", index=False)
-    print(f"\npattern_names.tsv: {len(df)} patterns; without any TomTom match "
-          f"{int((df.match0 == '').sum())}")
-    for label, _ in leaves:
-        s = df[df.label == label]
-        print(f"\n===== {label} =====")
-        print(s[["key", "n_seqlets", "name", "match0", "qval0"]].to_string(index=False))
+    print(f"pattern_names.tsv: {len(df)} patterns, {int((df.match0 == '').sum())} without a match")
 
 
 if __name__ == "__main__":

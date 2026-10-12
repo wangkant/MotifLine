@@ -1,22 +1,13 @@
-"""Adopt an archived attribution directory into a motifline stage tree.
+"""Adopt existing attributions into a run's attr/ stage.
 
-The archived ``interpret_{cbp,ag}_par_hyp/`` products cost GPU-days and the old
-tree is read-only, so adoption links rather than copies: ``attr.npy`` and
-``ohe.npy`` become absolute symlinks and only the normalized ``regions.bed`` is
-newly written. Nothing is written until every shape check passes.
-
-``normalize_peaks`` exists because the two archived peak formats disagree: the
-ChromBPNet side stores the 11-column ``load_region_df`` output while the AG side
-stores a 4-column ``chr/start/end/summit`` bed, and ``finemo
-extract-regions-modisco-fmt -p`` needs narrowPeak-shaped columns. The expansion
-performed here is exactly the one the archive itself performed when it built
-``peaks_np.bed`` (region_v3/gm12878/run_interpret_ag.sh:50-53).
+attr.npy and ohe.npy are symlinked, not copied; only regions.bed is written, and only
+after every shape check passes. The peaks bed may be 10/11-column narrowPeak or
+4-column chr/start/end/summit, which is expanded to the narrowPeak form finemo reads.
 """
 from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 
 import numpy as np
@@ -34,11 +25,7 @@ def _read_bed(path):
 
 
 def normalize_peaks_text(src) -> dict:
-    """Parse and validate ``src``, returning the text to write -- writes nothing.
-
-    Split out of ``normalize_peaks`` so a caller can fail on a malformed bed before it
-    creates anything on disk.
-    """
+    """Validate ``src`` and return the text to write; writes nothing."""
     lines = _read_bed(src)
     widths = {ln.count("\t") + 1 for ln in lines}
     if len(widths) > 1:
@@ -61,14 +48,12 @@ def normalize_peaks_text(src) -> dict:
 
 
 def write_peaks(parsed: dict, dst) -> dict:
-    """Write what ``normalize_peaks_text`` parsed."""
     Path(dst).parent.mkdir(parents=True, exist_ok=True)
     Path(dst).write_text(parsed["text"])
     return {k: v for k, v in parsed.items() if k != "text"}
 
 
 def normalize_peaks(src, dst) -> dict:
-    """Validate and write in one call (the shape every existing caller expects)."""
     return write_peaks(normalize_peaks_text(src), dst)
 
 
@@ -95,7 +80,6 @@ def adopt_attr(src_dir, out_dir, expected_rows: int, expected_width: int | None 
         raise ValueError(f"width drift: attr={sa[-1]} ohe={so[-1]} expected={expected_width}")
 
     out.mkdir(parents=True, exist_ok=True)
-    # Parse the bed before linking anything: it is the step that can still refuse.
     bed_text = normalize_peaks_text(peaks_src)
     for name, target in ((attr_name, attr_src), (ohe_name, ohe_src)):
         link = out / name
@@ -109,7 +93,7 @@ def adopt_attr(src_dir, out_dir, expected_rows: int, expected_width: int | None 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--src_dir", required=True, help="archived interpret_*_par_hyp directory")
+    ap.add_argument("--src_dir", required=True, help="directory holding attr.npy, ohe.npy and the peaks bed")
     ap.add_argument("--out_dir", required=True)
     ap.add_argument("--expected_rows", type=int, required=True)
     ap.add_argument("--expected_width", type=int, default=None,

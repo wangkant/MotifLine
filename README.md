@@ -17,7 +17,8 @@ these stages, with a shared downstream workflow for both supported models.
   identify recurring patterns with TF-MoDISco through modisco-lite.
 - **Locate motif occurrences:** use FiNeMo to call motif hits across the analyzed regions.
 - **Annotate patterns:** match motifs with TomTom against the union of the
-  HOCOMOCO and JASPAR reference motifs; the first match names the pattern, with no gate.
+  HOCOMOCO and JASPAR reference motifs; the best match names the pattern, and its
+  q-value is reported next to the name rather than used as a cutoff.
 - **Keep analyses traceable:** record stage commands, parameters, environments,
   and tool versions in `run_info.json`; track parameter changes for reruns.
 - **Support different run modes:** compute new attributions in one process or
@@ -52,7 +53,7 @@ Genomic peaks + model weights + reference genome
              |     Call motif hits: FiNeMo
              |          hits.tsv
              v
-     Annotate: TomTom, first match, no gate
+     Annotate: TomTom, best match + q-value
          pattern_names.tsv
              ^
              |
@@ -63,7 +64,7 @@ Genomic peaks + model weights + reference genome
 
 The reference lexicon is built once and shared across runs: the union of the
 HOCOMOCO H14 CORE and JASPAR CORE vertebrates non-redundant motifs. TomTom
-matches each pattern against it, and the first match gives the name.
+matches each pattern against it, and the best match gives the name.
 
 ## Installation
 
@@ -86,11 +87,13 @@ conda activate "$ENVS/orchestration"
 **AlphaGenome requires the `deeplift-support` branch of Ruchir Rastogi's
 `alphagenome-pytorch` fork.** The attribution rules used here are not included in
 the base PyTorch port described in the installation guide. Set `ag_src` to that
-checkout's `src/` directory **inside each AlphaGenome run entry**.
+checkout's `src/` directory **inside each AlphaGenome run entry**, together with the
+ATAC `track` and its `biosample`; the step checks the pair against AlphaGenome's track
+metadata.
 
 For computed runs, provide a reference genome and a 10- or 11-column narrowPeak
 file with summit offsets in column 10, plus the model checkpoint. The repository
-includes a selected 33,917-peak K562 set for the example analyses.
+includes an example K562 peak set.
 
 ## Quick start
 
@@ -103,11 +106,12 @@ $EDITOR config/default.yaml    # set paths, model weights, and runs
 motifline check                # validate configuration and input paths
 motifline smoke                # check motif discovery and hit calling on CPU
 motifline run -n               # preview the workflow
-motifline run -j 8 --gpus 2     # execute with up to 8 jobs and 2 GPU resources
+motifline run -j 8 --gpus 1     # up to 8 jobs, one GPU job at a time
 ```
 
-Choose available devices with `CUDA_VISIBLE_DEVICES`; `--gpus` limits GPU
-concurrency. You can also request a specific output:
+GPU steps use the first visible device; choose it with `CUDA_VISIBLE_DEVICES`.
+`--gpus` only limits concurrent GPU jobs. Arguments after `--` go to snakemake.
+You can also request a specific output:
 
 ```bash
 motifline run results/<run>/hits/hits.tsv -j 4
@@ -122,6 +126,7 @@ and cancelled runs, along with shared parameters and reference settings.
 | Setting | Behavior |
 |---|---|
 | `model: cbp` or `model: ag` | Select ChromBPNet or AlphaGenome. |
+| `track` + `biosample` (AG) | ATAC head index and the biosample it must be. |
 | `adopt_from` | Reuse archived attributions and run downstream stages. |
 | `n_shards` | Split attribution into GPU shards, then merge the results. |
 | Neither `adopt_from` nor `n_shards` | Compute attributions in one process. |
@@ -135,8 +140,8 @@ from the installed tools' defaults, so intentional parameter choices remain visi
 
 | Command | What it checks |
 |---|---|
-| `motifline check` | Missing or misspelled keys, missing paths, and peak files without the required summit column, reported together. |
-| `motifline smoke` | Recovery of an AP-1 motif planted in 180 of 300 synthetic attributions using MoDISco and FiNeMo. Runs on CPU in about a minute without model weights. |
+| `motifline check` | Missing or misspelled keys, wrong value types, missing paths, and invalid peak files (columns, summit inside the peak, known chromosomes, no repeated summits), reported together. |
+| `motifline smoke` | An AP-1 motif planted in 180 of 300 synthetic attributions is discovered by MoDISco and its FiNeMo hits fall on the planted positions. No GPU or model weights needed. |
 
 The smoke test covers motif discovery and hit calling. It does **not** validate
 model attribution or naming.
@@ -152,12 +157,14 @@ Results are organized by run under `results/<run>/`. Key files include:
 | `regions.bed` | Regions corresponding to the attribution rows. |
 | `modisco.h5` | Discovered motif patterns. |
 | `regions.npz` | Region data packaged for FiNeMo. |
-| `hits.tsv` | Called motif occurrences. |
+| `hits.tsv` | Called motif occurrences, per region; overlapping windows repeat a hit. |
+| `hits_unique.tsv` | The same hits, once per genomic position. |
 | `pattern_names.tsv` | Reference-based pattern annotations. |
 | `run_info.json` | Per-stage execution metadata and provenance. |
 
-Use `regions.bed` as the row key for downstream analysis: filtering during
-attribution means the retained rows may differ from the original peak file.
+Use `regions.bed` as the row key for downstream analysis: peaks whose window runs
+off the chromosome or contains a non-ACGT base are dropped, so rows can differ from
+the peak file and between models.
 See [docs/ARTIFACTS.md](docs/ARTIFACTS.md) for stage directories, array shapes,
 checkpoint behavior, and model-specific details.
 
@@ -167,18 +174,13 @@ checkpoint behavior, and model-specific details.
 Snakefile             Snakemake workflow
 config/default.yaml   Local configuration generated by motifline init (not tracked)
 config/example.yaml   Example runs and shared settings
-config/peaks/         Selected K562 peak set used by the example analyses
+config/peaks/         Example K562 peak set
 envs/                 Environment recipes and exact package locks
 src/motifline/        CLI, validation, attribution, naming, and orchestration
 src/motifline/steps/  Scripts executed in the compute environment
 docs/                 Installation and output documentation
 tests/                Tests runnable without a GPU
 ```
-
-Implementation rationale lives alongside the relevant code: `naming.py` covers
-the reference lexicon and the naming rule, `tools.py` covers parameter checks,
-`attribution.py` covers hypothetical attribution measurements, and
-`steps/attr_ag.py` / `steps/ag_support.py` cover AlphaGenome attribution.
 
 ## Citation and attribution
 
@@ -187,8 +189,8 @@ the underlying tools and methods relevant to your analysis.
 
 | tool | version here | where |
 |---|---|---|
-| ChromBPNet (official, TensorFlow; the K562 model and its DeepSHAP since 2026-10-08, run `k562_cbp2114_official_l50`) | chrombpnet 1.0.1 (PyPI), TF 2.8.0, `envs/chrombpnet_official` | github.com/kundajelab/chrombpnet |
-| ChromBPNet (PyTorch port; the `attribute` rule and the runs before 2026-10-08, retired for K562) | `jsxlei/chrombpnet-pytorch@01ad10b` | github.com/jsxlei/chrombpnet-pytorch |
+| ChromBPNet (official, TensorFlow; attributions adopted with `adopt_from`) | — | github.com/kundajelab/chrombpnet |
+| ChromBPNet (PyTorch port; the `attribute` rule) | `jsxlei/chrombpnet-pytorch@01ad10b` | github.com/jsxlei/chrombpnet-pytorch |
 | AlphaGenome (the model) | — | github.com/google-deepmind/alphagenome |
 | AlphaGenome PyTorch port | `genomicsxai/alphagenome-pytorch` | github.com/genomicsxai/alphagenome-pytorch |
 | AlphaGenome DeepLIFT rules | `rastogiruchir/alphagenome-pytorch@64e9b75`, branch `deeplift-support` | Ruchir Rastogi — github.com/rastogiruchir/alphagenome-pytorch |

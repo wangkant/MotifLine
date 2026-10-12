@@ -1,7 +1,4 @@
-# TomTom only, for `rule name_patterns`. Point reference_lexicon.tomtom at
-# <prefix>/bin/tomtom.
-#
-#   conda env create -p <kant>/envs/meme -f envs/meme.yaml
+# TomTom for name_patterns; point reference_lexicon.tomtom at <prefix>/bin/tomtom.
 name: motifline-meme
 channels: [bioconda, conda-forge]
 dependencies:

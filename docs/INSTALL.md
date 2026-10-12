@@ -1,14 +1,11 @@
 # Installing motifline
 
-Three conda environments, two model source checkouts, three reference files, one
-config. `motifline check` tells you what is still missing, and `motifline smoke`
-tells you whether the half that does not need a model works.
+Three conda environments, two model source checkouts, reference files and a config.
+`motifline check` reports what is still missing; `motifline smoke` tests the
+downstream half without a model.
 
-The pipeline itself is pure orchestration: it assembles command lines and hands them
-to interpreters in other environments. Nothing here is imported into the environment
-that runs snakemake, which is why they can hold incompatible versions of torch.
-
----
+motifline only assembles command lines: each stage runs in its own environment, so
+the orchestration and compute environments can hold incompatible packages.
 
 ## 1. The package
 
@@ -19,92 +16,91 @@ cd motifline
 
 ## 2. The environments
 
-`envs/*.yaml` are readable recipes pinned at the versions these runs were produced
-with; `envs/locks/` holds the exact package trees of the machine that produced them,
-for reproducing published numbers to the digit. Build the prefixes somewhere outside
-the repository — anywhere you like, config points at them by path — so that a clone
-never starts tracking a conda tree.
+`envs/*.yaml` pin the versions motifline is tested with; `envs/locks/` holds full
+package lists for reproducing results exactly. Build the prefixes outside the
+repository and point the config at them.
 
 ```bash
-ENVS=$HOME/motifline-envs                  # or wherever
+ENVS=$HOME/motifline-envs
 conda env create -p $ENVS/orchestration -f envs/orchestration.yaml
 conda env create -p $ENVS/compute       -f envs/compute.yaml
-conda env create -p $ENVS/meme          -f envs/meme.yaml      # TomTom
+conda env create -p $ENVS/meme          -f envs/meme.yaml
 $ENVS/orchestration/bin/pip install -e .
 ```
 
-| env | what runs in it | needed for |
+| env | runs | needed for |
 |---|---|---|
 | orchestration | snakemake, `motifline` | always |
-| compute | the attribution steps, MoDISco, FiNeMo | always |
+| compute | attribution steps, MoDISco, FiNeMo | always |
 | meme | `tomtom` | naming patterns |
 
-**CUDA.** `envs/compute.yaml` pins `torch==2.3.1+cu121`. If your driver needs a
-different CUDA build, change that line and the `--extra-index-url` above it. The
-DeepLIFT/SHAP references are seeded (`attribution.random_state`), so a torch change
-can move the last digits of an attribution — state the version next to anything you
-keep.
+`envs/compute.yaml` pins `torch==2.3.1+cu121`; for another CUDA build change that
+line and the index URL. The DeepLIFT/SHAP references are seeded, but a different
+torch build can change the last digits of an attribution, so record the version
+with any attributions you keep (`run_info.json` does).
+
+Importing `chrombpnet.interpret` downloads a motif file and genome chrom sizes
+through `pooch`. On a GPU node without network access, run the import once on a
+connected node so the files are in pooch's cache.
 
 ## 3. The model code
 
-Neither model is a pip package here. The attribution steps put a checkout on
-`sys.path` themselves, so you clone the repository and point config at it.
+Neither model is installed as a package. The attribution steps put the checkouts on
+`sys.path`; the config points at them.
 
 ```bash
-git clone https://github.com/jsxlei/chrombpnet-pytorch.git                  # -> chrombpnet_src
-git clone -b deeplift-support \
-    https://github.com/rastogiruchir/alphagenome-pytorch.git                # -> a run's ag_src
+git clone https://github.com/jsxlei/chrombpnet-pytorch.git          # chrombpnet_src
+git -C chrombpnet-pytorch checkout 01ad10b
+git clone -b deeplift-support https://github.com/rastogiruchir/alphagenome-pytorch.git
+git -C alphagenome-pytorch checkout 64e9b75                       # a run's ag_src = .../src
 ```
 
-**The AlphaGenome checkout is the `deeplift-support` branch of Ruchir Rastogi's fork,
-not the port itself.** The DeepLIFT rules the AG path needs — `attribution/deeplift.py`,
-his work, Apache-2.0 — are not merged into `genomicsxai/alphagenome-pytorch`; cloning
-the port gets you a checkout with no `attribution/` module and an AG path that cannot
-run. The `-b deeplift-support` above is what makes the difference.
+The AlphaGenome path needs the `deeplift-support` branch of Ruchir Rastogi's fork:
+its `attribution/deeplift.py` is not in `genomicsxai/alphagenome-pytorch`. A branch on
+a personal fork can move or disappear, so keep your own copy if the AG path matters.
 
-The runs in this repository used `chrombpnet-pytorch@01ad10b` and
-`rastogiruchir/alphagenome-pytorch@64e9b75`. `ag_src` is the `src/` directory inside
-that checkout, and it is declared **per run**, not at the top level — `attr_argv` reads
-`r["ag_src"]`, so a top-level key of that name is never read by anything.
+`ag_src` is set per run, not at the top level. Each AG run also names its `track` (an
+index into the ATAC head) and the `biosample` of that track; the step looks the track
+up in `alphagenome_pytorch/data/track_metadata_human.parquet` and refuses a mismatch
+(K562 is track 60).
 
-A branch on a personal fork can be rebased or deleted. If the AG path matters to you,
-fork it yourself and pin your own copy, or wait for the rules to land upstream.
-
-Model weights are yours to supply: a ChromBPNet run needs a bias-corrected checkpoint
-(`wo_bias`), an AlphaGenome run needs `weights`.
+Model weights: a ChromBPNet run needs a bias-corrected PyTorch state dict for
+`BPNet(512 filters, 8 layers)` (`wo_bias`); Keras `.h5` models are not read. An
+AlphaGenome run needs `weights` loadable by `AlphaGenome.from_pretrained`.
+Attributions computed elsewhere (e.g. with the official TensorFlow ChromBPNet) can be
+adopted with `adopt_from`.
 
 ## 4. Reference data
 
-| what | used by | where it came from |
+| what | config key | source |
 |---|---|---|
-| `hg38.fa` + `hg38.chrom.sizes` | every computed run | UCSC |
-| HOCOMOCO H14 CORE, MEME format (1,595 matrices) | `reference_lexicon.sources.H14` | hocomoco.autosome.org |
+| `hg38.fa`, `hg38.chrom.sizes` | `genome.fasta`, `genome.chrom_sizes` | UCSC |
+| HOCOMOCO H14 CORE, MEME format (1,595 matrices) | `reference_lexicon.sources.H14` | hocomoco14.autosome.org |
+| HOCOMOCO `H14CORE_annotation.jsonl` | `reference_lexicon.h14_annotation` | hocomoco14.autosome.org, same release |
 | JASPAR CORE vertebrates non-redundant, MEME format (1,019) | `reference_lexicon.sources.JAS` | jaspar.elixir.no |
 
-Both motif libraries are the publishers' own non-redundant releases, used without
-further de-duplication: TomTom matches against their union.
+TomTom matches against the union of the two libraries as published, without further
+de-duplication.
 
-Peaks must be 10- or 11-column narrowPeak with the summit offset in column 10:
-`finemo extract-regions-modisco-fmt -p` names the first ten columns positionally and
-reads the summit from there. `motifline check` verifies this.
+Peaks must be 10- or 11-column narrowPeak (11th column `True`) with the summit
+offset in column 10, no header lines, every chromosome in `chrom_sizes`, every summit inside its peak and no
+two peaks with the same summit. `motifline check` verifies all of this.
 
-A 33,917-peak K562 set ships at `config/peaks/k562_allpeaks_33917.bed` — the fixed
-region set the runs in this repository share. It covers 15 chromosomes and is a selected
-subset rather than a complete peak list, so for your own data supply your own narrowPeak
-and point a run's `peaks:` at it.
+`config/peaks/k562_allpeaks_33917.bed` is an example K562 peak set covering 15
+chromosomes. For your own data, point a run's `peaks:` at your narrowPeak.
 
 ## 5. The config
 
 ```bash
-motifline init                      # writes config/default.yaml
-$EDITOR config/default.yaml         # fill in the paths and declare your runs
-motifline check                     # every problem at once, before anything runs
+motifline init
+$EDITOR config/default.yaml
+motifline check
 ```
 
-`config/example.yaml` is a worked config with entries of each kind: computed,
-sharded, adopted, and cancelled. `motifline check` reports missing keys, misspelled
-keys (`n_shard` would otherwise silently make a sharded run single-process), paths
-that do not exist and peaks files without a summit column — all of them in one pass.
+`config/example.yaml` has one computed CBP run, one AG run and one adopted run.
+`motifline check` reports, in one pass: missing or misspelled keys (also inside
+`modisco:`, `finemo:` and the other sections), values of the wrong type, missing
+paths and invalid peak files. Relative paths resolve against the motifline checkout.
 
 ## 6. Does it work?
 
@@ -112,37 +108,38 @@ that do not exist and peaks files without a summit column — all of them in one
 motifline smoke
 ```
 
-This plants AP-1 (`TGACTCA`) in 180 of 300 synthetic hypothetical attributions, runs
-MoDISco and FiNeMo over them, and checks that the motif comes back. It takes about a
-minute on CPU and needs no genome, no model weights and no GPU.
-
-It covers the compute environment and the downstream half of the pipeline. It does
-**not** cover the attribution steps (they need real model weights) or naming.
+Plants AP-1 (`TGACTCA`) in 180 of 300 synthetic hypothetical attributions, runs
+MoDISco and FiNeMo, and checks that the motif is discovered and that the hits land
+on the planted positions. Needs no GPU (it uses one only if `CUDA_VISIBLE_DEVICES` is
+set), no genome and no weights. Attribution and naming are
+not covered.
 
 ## 7. Running
 
 ```bash
-motifline run -j 8 --gpus 2
-motifline run -n                                        # dry run
-motifline run results/<run>/hits/hits.tsv -j 4          # one target
+motifline run -n
+motifline run -j 8 --gpus 1
+motifline run results/<run>/hits/hits.tsv -j 4
+motifline run -j 8 -- --rerun-incomplete      # anything after -- goes to snakemake
 ```
 
-`motifline run` is `snakemake` after a config check, with snakemake's own rerun
-triggers: a stage reruns when its inputs, its parameters or its rule code change.
+A stage reruns when its declared inputs (for attribution: checkpoint, peaks, genome)
+or its parameters change, or when its rule body in the Snakefile changes. Edits to
+`src/motifline/steps/*.py` or to the model checkouts do not trigger reruns; after
+updating either, force the affected stages with `-R <rule>`. Each `run_info.json`
+records the motifline commit, and attribution stages also the model checkouts'.
 
-Every `run` prints the parameter deviation report before it starts.
-
-GPU selection is the caller's. Export `CUDA_VISIBLE_DEVICES` to fully-free cards,
-pinned by UUID rather than index, and bound concurrency with `--gpus`.
+Every GPU step uses the first visible device. `--gpus N` only limits how many GPU
+jobs run at once, so with N > 1 they share that device. Set `CUDA_VISIBLE_DEVICES`
+to the card you want.
 
 ## Reproducing the exact environment
 
 ```bash
 conda create -p $ENVS/compute --file envs/locks/compute.conda.txt
-$ENVS/compute/bin/pip install -r envs/locks/compute.pip.txt
+$ENVS/compute/bin/pip install --extra-index-url https://download.pytorch.org/whl/cu121 \
+    -r envs/locks/compute.pip.txt
+$ENVS/compute/bin/pip install pyarrow==17.0.0
 ```
 
-The locks were frozen on 2026-09-19 from the machine the runs in this repository were
-produced on. They exclude two editable installs that pointed at directories which no
-longer exist and which nothing imports — the pipeline reaches model code through
-`chrombpnet_src` / `ag_src`, never through an installed package.
+The locks predate the AlphaGenome track check, which needs `pyarrow`.

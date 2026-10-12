@@ -1,16 +1,12 @@
-"""Does this installation work? Plant a motif, discover it, call it back.
+"""motifline smoke: plant a motif in synthetic attributions and get it back.
 
-``motifline smoke`` answers the one question a new install cannot otherwise answer:
-are modisco and finemo present, do they agree on the array layout this pipeline writes,
-and does a motif that is definitely in the input come back out. It needs no genome, no
-model weights and no GPU -- the attributions are synthetic, so the only thing under test
-is the downstream half of the pipeline and the environment it runs in.
-
-It does not cover the attribution steps (they need real model weights) or naming
-(it needs TomTom and the source libraries).
+Checks the compute env and the downstream half of the pipeline (MoDISco, region
+packaging, FiNeMo), including that hits land on the planted coordinates. Attribution
+and naming are not covered.
 """
 from __future__ import annotations
 
+import csv
 import json
 import os
 import shutil
@@ -23,13 +19,11 @@ import numpy as np
 
 BASES = "ACGT"
 
-#: AP-1. Short, high information content, and not palindromic, so a recovered pattern
-#: can be told apart from its own reverse complement.
+# AP-1; not palindromic, so a recovered pattern is distinguishable from its reverse complement
 MOTIF = "TGACTCA"
 
 
 def decode(block: np.ndarray) -> str:
-    """One-hot ``(4, W)`` back to sequence."""
     return "".join(BASES[i] for i in block.argmax(axis=0))
 
 
@@ -39,16 +33,8 @@ def revcomp(seq: str) -> str:
 
 def synthetic(n: int = 300, width: int = 500, motif: str = MOTIF,
               frac: float = 0.6, seed: int = 0):
-    """Attributions with ``motif`` planted in ``frac`` of the regions.
-
-    Returns ``(attr, ohe, planted, bed)`` in the layout every attribution stage writes:
-    ``attr`` and ``ohe`` are ``(N, 4, W)``, ``planted[i]`` is where the motif starts in
-    region *i* or None, and ``bed`` is the 10-column narrowPeak text whose column 10
-    carries the summit finemo reads.
-
-    The attribution is hypothetical-shaped on purpose: every base of every position
-    carries a score, as ``--hypothetical`` produces, not just the observed one.
-    """
+    """(attr, ohe, planted, bed): `motif` planted in the central half of `frac` of the
+    regions, hypothetical-style scores on all four bases, region i at chr1:i*2*width."""
     rng = np.random.default_rng(seed)
     idx = rng.integers(0, 4, size=(n, width))
     ohe = np.zeros((n, 4, width), dtype=np.int8)
@@ -59,7 +45,6 @@ def synthetic(n: int = 300, width: int = 500, motif: str = MOTIF,
     m = len(motif)
     if width < 4 * m:
         raise ValueError(f"width {width} is too small to plant a {m}bp motif centrally")
-    # Planted in the central half, the way a real summit-centred peak set concentrates.
     half = width // 4
     lo, hi = width // 2 - half, min(width - m, width // 2 + half)
     planted: list[int | None] = []
@@ -73,7 +58,6 @@ def synthetic(n: int = 300, width: int = 500, motif: str = MOTIF,
             ohe[i, BASES.index(base), start + j] = 1
         planted.append(start)
 
-    # Background: small hypothetical scores everywhere, on all four bases.
     attr = rng.normal(0.0, 0.01, size=(n, 4, width)).astype(np.float32)
     for i, start in enumerate(planted):
         if start is None:
@@ -85,18 +69,14 @@ def synthetic(n: int = 300, width: int = 500, motif: str = MOTIF,
             rng.normal(1.0, 0.02, size=m).astype(np.float32)
 
     bed = "\n".join(
-        "\t".join([f"chr1", str(i * width * 2), str(i * width * 2 + width),
+        "\t".join(["chr1", str(i * width * 2), str(i * width * 2 + width),
                    f"smoke_{i}", "0", ".", "1.0", "-1", "-1", str(width // 2)])
         for i in range(n)) + "\n"
     return attr, ohe, planted, bed
 
 
-# --- the end-to-end check --------------------------------------------------
-
 def _run(argv, cwd) -> None:
     print("  $", " ".join(str(a) for a in argv), flush=True)
-    # CPU unless the caller chose a card: nothing here needs a GPU, and a smoke test
-    # must not land on a card somebody else is computing on.
     env = {**os.environ}
     env.setdefault("CUDA_VISIBLE_DEVICES", "")
     subprocess.run([str(a) for a in argv], cwd=cwd, check=True, env=env)
@@ -104,34 +84,54 @@ def _run(argv, cwd) -> None:
 
 def _compute_env(explicit: str | None) -> Path:
     if explicit:
-        return Path(explicit)
+        return Path(explicit).resolve()
     from motifline.cli import DEFAULT_CONFIG, find_workflow
     from motifline.config import load
     workflow = find_workflow()
     if workflow and (workflow / DEFAULT_CONFIG).is_file():
-        return Path(load(workflow / DEFAULT_CONFIG)["envs"]["compute"])
+        env = Path(load(workflow / DEFAULT_CONFIG)["envs"]["compute"]).expanduser()
+        return env if env.is_absolute() else (workflow / env).resolve()
     raise SystemExit("no --compute-env given and no config/default.yaml to read it from")
 
 
-def discovered_patterns(h5_path) -> list[str]:
-    """Consensus of every MoDISco pattern, read off its contribution weight matrix."""
+def discovered_patterns(h5_path) -> dict[str, str]:
+    """{group.pattern: consensus of |CWM|}."""
     import h5py
-    out = []
+    out = {}
     with h5py.File(h5_path, "r") as f:
         for group in ("pos_patterns", "neg_patterns"):
             if group not in f:
                 continue
             for name in f[group]:
                 cwm = np.asarray(f[group][name]["contrib_scores"])
-                out.append("".join(BASES[i] for i in np.abs(cwm).argmax(axis=1)))
+                out[f"{group}.{name}"] = "".join(BASES[i] for i in np.abs(cwm).argmax(axis=1))
     return out
+
+
+def hit_agreement(hits_tsv, motif_names, planted, width) -> dict:
+    """Precision: share of the motif's hits overlapping a planted site. Recall: share of
+    planted sites overlapped by a hit."""
+    sites = {i: i * width * 2 + p for i, p in enumerate(planted) if p is not None}
+    m = len(MOTIF)
+    on, total, found = 0, 0, set()
+    with open(hits_tsv) as fh:
+        for h in csv.DictReader(fh, delimiter="\t"):
+            if h["motif_name"] not in motif_names:
+                continue
+            total += 1
+            s, e = int(h["start"]), int(h["end"])
+            i = s // (width * 2)
+            if i in sites and s < sites[i] + m and e > sites[i]:
+                on += 1
+                found.add(i)
+    return {"hits": total, "precision": on / total if total else 0.0,
+            "recall": len(found) / len(sites) if sites else 0.0}
 
 
 def run_smoke(compute_env=None, workdir=None, keep: bool = False,
               n: int = 300, width: int = 500) -> int:
-    """Generate, discover, call hits, and report whether the planted motif came back."""
     env = _compute_env(compute_env)
-    tmp = Path(workdir) if workdir else Path(tempfile.mkdtemp(prefix="motifline_smoke_"))
+    tmp = Path(workdir).resolve() if workdir else Path(tempfile.mkdtemp(prefix="motifline_smoke_"))
     attr_dir = tmp / "attr"
     attr_dir.mkdir(parents=True, exist_ok=True)
     print(f"smoke: {tmp}\nsmoke: compute env {env}")
@@ -140,8 +140,6 @@ def run_smoke(compute_env=None, workdir=None, keep: bool = False,
     np.save(attr_dir / "attr.npy", attr)
     np.save(attr_dir / "ohe.npy", ohe)
     (attr_dir / "regions.bed").write_text(bed)
-    print(f"smoke: {n} regions x {width}bp, {MOTIF} planted in "
-          f"{sum(p is not None for p in planted)}")
 
     h5 = tmp / "modisco" / "modisco.h5"
     h5.parent.mkdir(exist_ok=True)
@@ -161,18 +159,16 @@ def run_smoke(compute_env=None, workdir=None, keep: bool = False,
 
     patterns = discovered_patterns(h5)
     wanted = (MOTIF, revcomp(MOTIF))
-    found = [p for p in patterns if any(w in p for w in wanted)]
-    n_hits = sum(1 for _ in open(hits_dir / "hits.tsv")) - 1
+    recovered = {k for k, p in patterns.items() if any(w in p for w in wanted)}
+    agree = hit_agreement(hits_dir / "hits.tsv", recovered, planted, width)
+    print(json.dumps({"patterns": patterns, "recovered": sorted(recovered), **agree}, indent=2))
 
-    print(json.dumps({"patterns": patterns, "recovered": found, "hits": n_hits},
-                     indent=2))
-    ok = bool(found) and n_hits > 0
+    ok = bool(recovered) and agree["precision"] >= 0.8 and agree["recall"] >= 0.5
     if ok:
-        print(f"\nsmoke PASSED: {MOTIF} recovered in {len(found)} of "
-              f"{len(patterns)} pattern(s); {n_hits} hits called")
+        print(f"\nsmoke PASSED: {MOTIF} recovered; hit precision {agree['precision']:.2f}, "
+              f"recall {agree['recall']:.2f}")
     else:
-        print(f"\nsmoke FAILED: planted {MOTIF}, discovered {patterns}, "
-              f"{n_hits} hits", file=sys.stderr)
+        print(f"\nsmoke FAILED: recovered {sorted(recovered)}, {agree}", file=sys.stderr)
     if keep or not ok:
         print(f"working directory kept at {tmp}")
     else:

@@ -1,10 +1,5 @@
-"""Where the machine-specific tests get their paths.
-
-No site path is hardcoded here: the repository is public and a prior commit
-(`chore: sanitize site paths for public release`) took them out on purpose. A test that
-needs a real compute environment reads it from MOTIFLINE_COMPUTE_ENV, or from the
-config the pipeline is actually driven with, and skips when there is neither.
-"""
+"""Paths for tests that need a real compute env: MOTIFLINE_COMPUTE_ENV /
+MOTIFLINE_CHROMBPNET_SRC, or config/default.yaml. Those tests skip without one."""
 from __future__ import annotations
 
 import os

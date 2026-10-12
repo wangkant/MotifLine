@@ -1,104 +1,59 @@
 envs:
-  compute: /path/to/envs/compute   # torch, chrombpnet, tangermeme, modisco-lite, finemo 0.30
+  compute: /path/to/envs/compute
 chrombpnet_src: /path/to/chrombpnet-pytorch
-# A computed AlphaGenome run declares `ag_src` in its OWN entry, not here: attr_argv
-# reads r["ag_src"], so a top-level key of that name is never read by anything.
 genome:
   fasta: /path/to/hg38.fa
   chrom_sizes: /path/to/hg38.chrom.sizes
 
-# Attribution references (cbp / ag). tangermeme seeds each reference by random_state +
-# shuffle index (deep_lift_shap.py:428-433), deliberately so batching cannot change the
-# output; what CAN change it is the reference COUNT and the seed. Both are stated here
-# rather than inherited from chrombpnet's/tangermeme's signature, which a version bump
-# could move under us. A run may override either.
+# A run may override either value.
 attribution:
-  n_shuffles: 20         # == the tools' current default; verified, not assumed
+  n_shuffles: 20
   random_state: 42
 
-# Attribution windows are per run: a run declaring in_window/crop passes them to its
-# step, otherwise the step's default applies (cbp 2114; ag 2048 in / 2048 stored).
-# Downstream stages read the width off attr.npy.
-
 runs:
-  # ---- adopted runs: archived attributions linked in, downstream recomputed ----
-  # These three adopt attributions whose source arrays have since been deleted:
-  # their attr/ohe symlinks dangle, while modisco.h5 / regions.npz / hits.tsv / naming
-  # stay under results/<run>/ as finished artifacts. `cancelled: true` keeps a bare
-  # `snakemake` from trying to re-import a directory that no longer exists; the entries
-  # stay so the artifacts keep a run definition to be read against.
-  k562_cbp_adopted:
-    cancelled: true
-    cancelled_note: results/k562_cbp_adopted/CANCELLED.md
-    model: cbp
-    adopt_from: /path/to/archive/k562_cbp_interpret
-    adopt_peaks: peaks.bed          # already the 11-col load_region_df form
-    rows: 33917
-    in_window: 2114
-  # AG at its NATIVE 2048bp window (16 x 128bp trunk bins). Same 33,917 regions, same
-  # peaks.bed rows as the CBP side, so the two runs pair row-for-row.
-  k562_ag2048_adopted:
-    cancelled: true
-    cancelled_note: results/k562_ag2048_adopted/CANCELLED.md
-    model: ag
-    adopt_from: /path/to/archive/k562_ag2048_interpret
-    adopt_peaks: peaks.bed          # 4-col chr/start/end/summit -> expanded to narrowPeak form
-    rows: 33917
-    in_window: 2048
-    crop: 2048
-  gm12878_cbp_adopted:
-    cancelled: true
-    cancelled_note: results/gm12878_cbp_adopted/CANCELLED.md
-    model: cbp
-    adopt_from: /path/to/archive/gm12878_cbp_interpret
-    adopt_peaks: peaks.bed
-    rows: 21084
-    in_window: 2114
-  # ---- computed runs: this pipeline does the attribution ----
-  # A run with neither `adopt_from` nor `n_shards` attributes in one process; add
-  # `n_shards: <N>` to split it one shard per GPU and merge. `head: <N>` cuts the
-  # peak list down to a slice for a first pass.
+  # ChromBPNet, split into 4 GPU shards and merged.
   k562_cbp:
     model: cbp
     wo_bias: /path/to/k562_chrombpnet_wo_bias.pt
     peaks: config/peaks/k562_allpeaks_33917.bed
     n_shards: 4
-    rows: 33917
-  # AlphaGenome declares `ag_src` in its OWN entry -- attr_argv reads r["ag_src"], so
-  # a top-level key of that name would never be read. `track` picks the output head;
-  # `crop` is the central width kept out of `in_window`.
-  k562_ag2048:
+
+  # AlphaGenome. `track` indexes the ATAC head; `biosample` must match that track's
+  # biosample_name in AlphaGenome's metadata or the step refuses to run.
+  k562_ag:
     model: ag
     ag_src: /path/to/alphagenome-pytorch/src
-    weights: /path/to/alphagenome_weights.pt
+    weights: /path/to/alphagenome_weights.safetensors
     peaks: config/peaks/k562_allpeaks_33917.bed
-    track: 0
+    track: 60
+    biosample: K562
     chunk: 100
     in_window: 2048
     crop: 2048
-    head: 2000
 
-# Canonical parameters. Every value here is the tool's own official default
-# (`--help` in the compute env) unless the note says why it cannot be.
+  # Attributions computed elsewhere: attr.npy, ohe.npy and a peaks bed in one directory.
+  # `rows` is the row count the arrays must have. `cancelled: true` keeps a run out of
+  # the default targets.
+  k562_cbp_archived:
+    model: cbp
+    adopt_from: /path/to/archived_attributions
+    rows: 10000
+    in_window: 2114
+    cancelled: true
+
+# All values are the tools' defaults, except max_seqlets, which has none.
 modisco:
-  max_seqlets: 1000000   # -n is REQUIRED by the CLI: no official default exists to adopt
-  window: 400            # official default
-  # -l 2, -z 20, -t 30, -f 5, -g 10, -j 0 left unset = official defaults
+  max_seqlets: 1000000
+  window: 400
 finemo:
-  mode: pp               # official default
-  threshold: 0.3         # -t, official default
-  alpha: 0.7             # -l/--global-lambda, official default
-  batch: 2000            # -b, official default
-  # -s 3.0, -i 0.08, -j 0.7, -c 5e-4, -S 10000 left unset = official defaults
+  mode: pp
+  threshold: 0.3      # --cwm-trim-threshold, not a hit-score threshold
+  alpha: 0.7          # --global-lambda
+  batch: 2000
 
-# Reference lexicon: where pattern names come from (TomTom against the union of these
-# sources, name = TF of the first match; src/motifline/naming.py).
 reference_lexicon:
-  # Concatenated in this order; the publishers' own non-redundant releases, not
-  # de-duplicated further.
   sources:
     H14: /path/to/hocomoco14_core.meme
     JAS: /path/to/jaspar2026_core_vert_nr.meme
-  # HOCOMOCO's own annotation: H14 id -> HUMAN gene symbol for the names.
   h14_annotation: /path/to/H14CORE_annotation.jsonl
   tomtom: /path/to/envs/meme/bin/tomtom

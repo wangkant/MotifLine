@@ -1,19 +1,8 @@
-# Everything downstream of a config file: the attribution steps, MoDISco and FiNeMo.
-# Conda supplies python and pip only -- every scientific package here is a wheel, so
-# pinning them through pip is what actually determines the result.
+# Attribution steps, MoDISco and FiNeMo. Model code is not installed here; the steps put
+# the chrombpnet_src / ag_src checkouts on sys.path. Exact versions: envs/locks/compute.*
 #
-#   conda env create -p <kant>/envs/chrombpnet_local -f envs/compute.yaml
-#
-# The model code is NOT installed here. attr_cbp.py and attr_ag.py put the checkout
-# named by `chrombpnet_src` / a run's `ag_src` on sys.path themselves; see
-# docs/INSTALL.md for the two repositories and the commits these runs used.
-#
-# torch is pinned to the CUDA 12.1 build that produced the published attributions.
-# A different CUDA build changes nothing about the science, but the DeepLIFT/SHAP
-# references are seeded (attribution.random_state), so a torch change can move the
-# last digits; state the version next to any attributions you keep.
-#
-# Exact tree of the machine these runs were produced on: envs/locks/compute.*
+# DeepLIFT/SHAP references are seeded, but a different torch or CUDA build can still
+# change the last digits of an attribution.
 name: motifline-compute
 channels: [conda-forge]
 dependencies:
@@ -29,6 +18,13 @@ dependencies:
       - pyfaidx==0.9.0.4
       - tangermeme==1.0.4
       - modisco-lite==2.4.0
-      # FiNeMo has no PyPI release; 0.30 is this commit. The version matters and is
-      # not interchangeable with 0.41 -- note it next to any hits you keep.
+      # FiNeMo 0.30 has no PyPI release
       - finemo @ git+https://github.com/austintwang/finemo_gpu.git@5c6f521c773f61f50307ff7cc59682073a56a65a
+      # imported by chrombpnet-pytorch and alphagenome-pytorch
+      - lightning==2.6.1
+      - pooch==1.9.0
+      - pyBigWig==0.3.25
+      - tqdm==4.67.3
+      - safetensors==0.7.0
+      # reads AlphaGenome's track metadata
+      - pyarrow==17.0.0
