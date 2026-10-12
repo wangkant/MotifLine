@@ -187,7 +187,8 @@ the underlying tools and methods relevant to your analysis.
 
 | tool | version here | where |
 |---|---|---|
-| ChromBPNet (PyTorch port) | `jsxlei/chrombpnet-pytorch@01ad10b` | github.com/kundajelab/chrombpnet |
+| ChromBPNet (official, TensorFlow; the K562 model and its DeepSHAP since 2026-10-08, run `k562_cbp2114_official_l50`) | chrombpnet 1.0.1 (PyPI), TF 2.8.0, `envs/chrombpnet_official` | github.com/kundajelab/chrombpnet |
+| ChromBPNet (PyTorch port; the `attribute` rule and the runs before 2026-10-08, retired for K562) | `jsxlei/chrombpnet-pytorch@01ad10b` | github.com/jsxlei/chrombpnet-pytorch |
 | AlphaGenome (the model) | — | github.com/google-deepmind/alphagenome |
 | AlphaGenome PyTorch port | `genomicsxai/alphagenome-pytorch` | github.com/genomicsxai/alphagenome-pytorch |
 | AlphaGenome DeepLIFT rules | `rastogiruchir/alphagenome-pytorch@64e9b75`, branch `deeplift-support` | Ruchir Rastogi — github.com/rastogiruchir/alphagenome-pytorch |
