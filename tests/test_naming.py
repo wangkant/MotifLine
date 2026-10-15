@@ -24,7 +24,7 @@ name_step = _load("name_patterns")
 CFG = {"reference_lexicon": {
     "sources": {"H14": "/lib/h14.meme", "JAS": "/lib/jaspar.meme"},
     "tomtom": "/env/meme/bin/tomtom",
-    "h14_annotation": "/lib/H14CORE_annotation.jsonl"}}
+    "h14_annotation": "/lib/H14CORE_annotation.jsonl", "qval_threshold": 0.05}}
 
 HOCOMOCO_STYLE = """MEME version 4
 
@@ -120,3 +120,8 @@ def test_union_refuses_a_motif_line_it_cannot_turn_into_one_id(tmp_path):
     p.write_text(JASPAR_STYLE.replace("MOTIF MA0004.1 Arnt", "MOTIF MA0004.1 Arnt extra"))
     with pytest.raises(ValueError, match="unexpected MOTIF line"):
         union_step.blocks(p)
+
+
+def test_confident_flags_without_dropping():
+    q = [0.01, 0.05, 0.2, np.nan]
+    assert list(name_step.confident(q, 0.05)) == [True, True, False, False]

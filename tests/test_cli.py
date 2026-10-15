@@ -141,7 +141,7 @@ def real_env_cfg(**over):
 
 @has_compute
 def test_check_states_that_the_parameters_are_the_tools_own_defaults(tmp_path, capsys):
-    cfg = write_cfg(tmp_path, real_env_cfg())
+    cfg = write_cfg(tmp_path, real_env_cfg(modisco_n_leiden=2))
     assert main(["check", "-c", str(cfg), "--no-paths"]) == 0
     assert "official default" in capsys.readouterr().out
 

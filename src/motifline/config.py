@@ -37,7 +37,7 @@ SECTION_KEYS = {
     "attribution": {"n_shuffles", "random_state"},
     "modisco": {"max_seqlets", "window", "n_leiden"},
     "finemo": {"mode", "threshold", "alpha", "batch"},
-    "reference_lexicon": {"sources", "tomtom", "h14_annotation"},
+    "reference_lexicon": {"sources", "tomtom", "h14_annotation", "qval_threshold"},
 }
 
 POSITIVE_INTS = ("head", "n_shards", "rows", "in_window", "crop", "chunk", "n_shuffles")
@@ -112,7 +112,7 @@ def _structure(cfg: dict, runs: dict) -> list[str]:
             out.append(f"{section}: unknown key(s) {sorted(set(node) - allowed)} "
                        f"(expected some of {sorted(allowed)})")
 
-    for dotted in ("envs.compute", "modisco.max_seqlets", "modisco.window",
+    for dotted in ("envs.compute", "modisco.max_seqlets", "modisco.window", "modisco.n_leiden",
                    "finemo.mode", "finemo.threshold", "finemo.alpha", "finemo.batch"):
         out += _require(cfg, dotted)
 
@@ -125,6 +125,14 @@ def _structure(cfg: dict, runs: dict) -> list[str]:
     win = (cfg.get("modisco") or {}).get("window")
     if win is not None and not (isinstance(win, int) and win > 0):
         out.append(f"modisco.window: must be a positive integer, not {win!r}")
+    leiden = (cfg.get("modisco") or {}).get("n_leiden")
+    if leiden is not None and not (isinstance(leiden, int) and not isinstance(leiden, bool)
+                                   and leiden > 0):
+        out.append(f"modisco.n_leiden: must be a positive integer, not {leiden!r}")
+    q = (cfg.get("reference_lexicon") or {}).get("qval_threshold")
+    if q is not None and not (isinstance(q, (int, float)) and not isinstance(q, bool)
+                              and 0 < q <= 1):
+        out.append(f"reference_lexicon.qval_threshold: must be in (0, 1], not {q!r}")
     mode = (cfg.get("finemo") or {}).get("mode")
     if mode is not None and mode not in ("pp", "ph", "hp", "hh"):
         out.append(f"finemo.mode: {mode!r} is not one of pp/ph/hp/hh")

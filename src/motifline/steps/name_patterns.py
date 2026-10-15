@@ -2,8 +2,8 @@
 """Name MoDISco patterns by TomTom against the reference union.
 
 Each pattern is trimmed as in modiscolite's report (|CWM| >= 30% of max), queried
-against the union, and named after the gene symbol of its best match. There is no
-q-value gate; q-values are reported next to the name.
+against the union, and named after the gene symbol of its best match. Every pattern
+keeps its name; `confident` marks those whose best match has q <= qval_threshold.
 """
 import argparse
 import hashlib
@@ -84,6 +84,12 @@ def tf_name(motif_id, h14):
     raise KeyError(f"{s}: not in the HOCOMOCO annotation and not a JASPAR id")
 
 
+def confident(qvals, threshold):
+    """q <= threshold; a pattern without a match (NaN) is never confident."""
+    q = np.asarray(qvals, dtype=float)
+    return ~np.isnan(q) & (q <= threshold)
+
+
 def _top(tsv, n=3):
     t = pd.read_csv(tsv, sep="\t", comment="#").dropna(subset=["Query_ID"])
     t = t.sort_values(["Query_ID", "q-value", "p-value"])
@@ -97,6 +103,7 @@ def main():
     p.add_argument("--target", required=True)
     p.add_argument("--h14_annotation", required=True)
     p.add_argument("--tomtom", required=True)
+    p.add_argument("--qval_threshold", type=float, required=True)
     p.add_argument("--out_dir", required=True)
     a = p.parse_args()
 
@@ -145,11 +152,14 @@ def main():
             rec["name"] = rec["tf0"]
             rows.append(rec)
     df = pd.DataFrame(rows)
+    df["confident"] = confident(df["qval0"], a.qval_threshold)
+    df["qval_threshold"] = a.qval_threshold
     df["target"] = Path(a.target).name
     df["target_sha256"] = _digest(a.target)[:12]
     df["h14_annotation_sha256"] = _digest(a.h14_annotation)[:12]
     df.to_csv(out / "pattern_names.tsv", sep="\t", index=False)
-    print(f"pattern_names.tsv: {len(df)} patterns, {int((df.match0 == '').sum())} without a match")
+    print(f"pattern_names.tsv: {len(df)} patterns, {int(df.confident.sum())} with q <= "
+          f"{a.qval_threshold}, {int((df.match0 == '').sum())} without a match")
 
 
 if __name__ == "__main__":

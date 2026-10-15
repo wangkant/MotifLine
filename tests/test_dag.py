@@ -24,10 +24,10 @@ def _config(tmp_path):
         "chrombpnet_src": str(tmp_path / "cbp_src"),
         "genome": {"fasta": f("hg38.fa"), "chrom_sizes": f("hg38.chrom.sizes")},
         "attribution": {"n_shuffles": 20, "random_state": 42},
-        "modisco": {"max_seqlets": 1000000, "window": 400},
+        "modisco": {"max_seqlets": 1000000, "window": 400, "n_leiden": 50},
         "finemo": {"mode": "pp", "threshold": 0.3, "alpha": 0.7, "batch": 2000},
         "reference_lexicon": {"sources": {"H14": f("h14.meme"), "JAS": f("jas.meme")},
-                              "h14_annotation": f("h14.jsonl"),
+                              "h14_annotation": f("h14.jsonl"), "qval_threshold": 0.05,
                               "tomtom": str(tmp_path / "tomtom")},
         "runs": {
             "single": {"model": "cbp", "wo_bias": f("m.pt"), "peaks": f("p.bed")},

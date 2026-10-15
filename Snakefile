@@ -42,7 +42,8 @@ def sig_import_attr(w):
 def sig_naming(w=None):
     lex = nm.params(config)
     return param_sig(target=nm.UNION, tomtom=lex["tomtom"],
-                     h14_annotation=lex["h14_annotation"])
+                     h14_annotation=lex["h14_annotation"],
+                     qval_threshold=lex["qval_threshold"])
 
 
 def run_body(out_dir, argv, stage, env=None, prefix=None, sig=None, checks=(), code=None):
@@ -240,9 +241,8 @@ rule discover:
         out = f"results/{wildcards.run}/modisco"
         argv = [f"{ENV}/bin/modisco", "motifs", "-s", f"{attr_dir}/ohe.npy",
                 "-a", f"{attr_dir}/attr.npy", "-n", str(config["modisco"]["max_seqlets"]),
-                "-w", str(config["modisco"]["window"]), "-o", f"{out}/modisco.h5"]
-        if "n_leiden" in config["modisco"]:
-            argv += ["-l", str(config["modisco"]["n_leiden"])]
+                "-w", str(config["modisco"]["window"]),
+                "-l", str(config["modisco"]["n_leiden"]), "-o", f"{out}/modisco.h5"]
         run_body(out, argv, "discover", env=thread_env(threads), sig=params.sig)
 
 rule extract_regions:
@@ -322,5 +322,6 @@ rule name_patterns:
         argv = [PY, str(STEPS / "name_patterns.py"),
                 "--h5", f"{wildcards.run}={input.h5}", "--target", input.lex,
                 "--h14_annotation", input.h14,
-                "--tomtom", nm.params(config)["tomtom"], "--out_dir", out]
+                "--tomtom", nm.params(config)["tomtom"],
+                "--qval_threshold", str(nm.params(config)["qval_threshold"]), "--out_dir", out]
         run_body(out, argv, "name_patterns", sig=params.sig)

@@ -17,8 +17,9 @@ these stages, with a shared downstream workflow for both supported models.
   identify recurring patterns with TF-MoDISco through modisco-lite.
 - **Locate motif occurrences:** use FiNeMo to call motif hits across the analyzed regions.
 - **Annotate patterns:** match motifs with TomTom against the union of the
-  HOCOMOCO and JASPAR reference motifs; the best match names the pattern, and its
-  q-value is reported next to the name rather than used as a cutoff.
+  HOCOMOCO and JASPAR reference motifs; the best match names the pattern. Its
+  q-value is reported, and a `confident` column flags matches with q at or below
+  `qval_threshold` without dropping the rest.
 - **Keep analyses traceable:** record stage commands, parameters, environments,
   and tool versions in `run_info.json`; track parameter changes for reruns.
 - **Support different run modes:** compute new attributions in one process or

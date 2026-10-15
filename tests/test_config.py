@@ -14,12 +14,13 @@ def cfg_cbp(**over):
         "chrombpnet_src": "/m/chrombpnet",
         "genome": {"fasta": "/g/hg38.fa", "chrom_sizes": "/g/hg38.chrom.sizes"},
         "attribution": {"n_shuffles": 20, "random_state": 42},
-        "modisco": {"max_seqlets": 1000, "window": 400},
+        "modisco": {"max_seqlets": 1000, "window": 400, "n_leiden": 50},
         "finemo": {"mode": "pp", "threshold": 0.3, "alpha": 0.7, "batch": 2000},
         "reference_lexicon": {
             "sources": {"H14": "/l/h14.meme"},
             "tomtom": "/e/meme/bin/tomtom",
             "h14_annotation": "/l/H14CORE_annotation.jsonl",
+            "qval_threshold": 0.05,
         },
         "runs": {"r1": {"model": "cbp", "wo_bias": "/m/wo_bias.pt", "peaks": "p.bed"}},
     }
@@ -252,3 +253,15 @@ def test_rows_on_a_single_process_run_is_reported():
 def test_an_eleventh_column_other_than_true_is_reported(tmp_path):
     assert only(_peaks_cfg(tmp_path, ROW.format(summit=50).replace("\n", "\tFalse\n")),
                 "column 11 must be True")
+
+
+def test_n_leiden_must_be_stated():
+    c = cfg_cbp()
+    del c["modisco"]["n_leiden"]
+    assert only(problems(c, paths=False), "modisco.n_leiden")
+
+
+def test_qval_threshold_must_be_a_probability():
+    c = cfg_cbp()
+    c["reference_lexicon"]["qval_threshold"] = 5
+    assert only(problems(c, paths=False), "qval_threshold")

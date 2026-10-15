@@ -11,7 +11,8 @@ class NamingError(KeyError):
 
 def params(cfg: dict) -> dict:
     c = cfg.get("reference_lexicon") or {}
-    missing = [k for k in ("sources", "tomtom", "h14_annotation") if k not in c]
+    missing = [k for k in ("sources", "tomtom", "h14_annotation", "qval_threshold")
+               if k not in c]
     if missing:
         raise NamingError(f"config.reference_lexicon is missing {missing}")
     if not c["sources"]:

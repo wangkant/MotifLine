@@ -138,13 +138,15 @@ the stage.
 |---|---|
 | `<label>_query.meme` | patterns as queried: PPM cut to modiscolite's `|CWM|` ≥ 30%-of-max span |
 | `tomtom_<label>/` | TomTom output, regenerated on every run of the stage |
-| `pattern_names.tsv` | per pattern: `label, key, group, pattern, n_seqlets, trim_*`, `match0..2`, `tf0..2`, `pval0..2`, `qval0..2`, `overlap0..2`, `name`, `target`, `target_sha256`, `h14_annotation_sha256` |
+| `pattern_names.tsv` | per pattern: `label, key, group, pattern, n_seqlets, trim_*`, `match0..2`, `tf0..2`, `pval0..2`, `qval0..2`, `overlap0..2`, `name`, `confident`, `qval_threshold`, `target`, `target_sha256`, `h14_annotation_sha256` |
 
 `key` (`pos_patterns.pattern_0`) is the `motif_name` used in `hits.tsv`.
 
 `name` is `tf0`: the gene symbol of the best TomTom match (lowest q, then p) at
-E ≤ 10, whatever its q-value; `qval0` is reported beside it and nothing is decided
-on it. A pattern with no match at E ≤ 10 has an empty name. HOCOMOCO symbols come
+E ≤ 10, whatever its q-value. `confident` is true when `qval0` ≤
+`reference_lexicon.qval_threshold` (default 0.05 in the example config). It is a flag
+for filtering, not a filter: no pattern is renamed or dropped, and a `name` with
+`confident` false is a candidate annotation, not an identified TF. A pattern with no match at E ≤ 10 has an empty name. HOCOMOCO symbols come
 from `H14CORE_annotation.jsonl` (HUMAN `gene_symbol`); an id missing there stops the
 stage. JASPAR symbols are the name after `_`, upper-cased (`MA2503.1_Banp` → `BANP`);
 for non-human entries that is not an HGNC symbol, and dimers stay `A::B`.

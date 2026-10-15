@@ -19,6 +19,8 @@ attribution:
 modisco:
   max_seqlets: 1000000
   window: 400
+  # -l: the CLI default is 2; TFMoDISco() and the original TF-MoDISco use 50
+  n_leiden: 50
 
 # finemo call-hits defaults (0.30)
 finemo:
@@ -33,6 +35,8 @@ reference_lexicon:
     JAS: /path/to/jaspar2026_core_vert_nr.meme
   h14_annotation: /path/to/H14CORE_annotation.jsonl
   tomtom: /path/to/envs/meme/bin/tomtom
+  # flags matches with q <= this as confident; nothing is dropped
+  qval_threshold: 0.05
 
 # One entry per run; see config/example.yaml.
 runs: {}
