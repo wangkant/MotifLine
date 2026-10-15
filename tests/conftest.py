@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parents[1]
+
+# steps import their sibling modules, as they do when run as scripts
+sys.path.insert(0, str(REPO / "src/motifline/steps"))
 
 
 def _from_config(*keys):

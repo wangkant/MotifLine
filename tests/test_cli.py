@@ -176,3 +176,17 @@ def test_arguments_after_a_double_dash_reach_snakemake(tmp_path, monkeypatch):
 def test_a_double_dash_outside_run_is_an_error(tmp_path):
     with pytest.raises(SystemExit):
         main(["check", "-c", str(write_cfg(tmp_path)), "--", "--unlock"])
+
+
+def test_check_resolves_paths_against_the_checkout_holding_the_config(tmp_path, monkeypatch):
+    checkout = tmp_path / "checkout"
+    (checkout / "config").mkdir(parents=True)
+    (checkout / "Snakefile").write_text("")
+    (checkout / "p.bed").write_text("chr1\t100\t200\tpk\t0\t.\t1.0\t-1\t-1\t50\n")
+    cfg = write_cfg(checkout / "config")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    main(["check", "-c", str(cfg)])
+    from motifline.config import load, problems
+    assert not [p for p in problems(load(cfg), base=checkout) if "p.bed" in p and "exist" in p]

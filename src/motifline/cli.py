@@ -72,7 +72,9 @@ def cmd_check(args) -> int:
     except ConfigError as e:
         print(str(e), file=sys.stderr)
         return 1
-    found = problems(cfg, paths=not args.no_paths, base=find_workflow() or Path.cwd())
+    # the checkout holding the config is where it runs
+    base = find_workflow(Path(args.config).resolve().parent) or find_workflow() or Path.cwd()
+    found = problems(cfg, paths=not args.no_paths, base=base)
     if found:
         scope = "structure" if args.no_paths else "structure and paths"
         print(f"{len(found)} problem(s) in {args.config} ({scope}):", file=sys.stderr)

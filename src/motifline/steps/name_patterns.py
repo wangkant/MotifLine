@@ -6,7 +6,6 @@ against the union, and named after the gene symbol of its best match. Every patt
 keeps its name; `confident` marks those whose best match has q <= qval_threshold.
 """
 import argparse
-import hashlib
 import json
 import re
 import shutil
@@ -17,17 +16,11 @@ import h5py
 import numpy as np
 import pandas as pd
 
+from digests import file_sha256
+
 MEME_HEADER = ("MEME version 4\n\nALPHABET= ACGT\n\nstrands: + -\n\n"
                "Background letter frequencies\nA 0.25 C 0.25 G 0.25 T 0.25\n\n")
 GROUPS = ("pos_patterns", "neg_patterns")
-
-
-def _digest(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def modisco_trim(ppm, cwm, threshold=0.3):
@@ -155,8 +148,8 @@ def main():
     df["confident"] = confident(df["qval0"], a.qval_threshold)
     df["qval_threshold"] = a.qval_threshold
     df["target"] = Path(a.target).name
-    df["target_sha256"] = _digest(a.target)[:12]
-    df["h14_annotation_sha256"] = _digest(a.h14_annotation)[:12]
+    df["target_sha256"] = file_sha256(a.target)[:12]
+    df["h14_annotation_sha256"] = file_sha256(a.h14_annotation)[:12]
     df.to_csv(out / "pattern_names.tsv", sep="\t", index=False)
     print(f"pattern_names.tsv: {len(df)} patterns, {int(df.confident.sum())} with q <= "
           f"{a.qval_threshold}, {int((df.match0 == '').sum())} without a match")

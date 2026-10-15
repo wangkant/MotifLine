@@ -11,6 +11,7 @@ from snakemake.exceptions import WorkflowError
 
 from motifline import naming as nm
 from motifline.attribution import hyp_check
+from motifline.config import attr_inputs as attr_input_paths, missing_attr_inputs
 from motifline.config import check as check_config
 from motifline.runs import active_runs, cancelled_runs
 from motifline.stages import run_body as _run_body
@@ -35,7 +36,10 @@ def param_sig(**kv):
 
 def sig_import_attr(w):
     r = rundef(w)
-    return param_sig(src=r["adopt_from"], rows=r["rows"], width=adopt_width(r),
+    # the declared width as recorded before, so finished runs keep their signature
+    width = r.get("crop", r.get("in_window"))
+    return param_sig(src=r["adopt_from"], rows=r["rows"],
+                     width=None if width is None else int(width),
                      peaks=r.get("adopt_peaks", "peaks.bed"))
 
 
@@ -73,13 +77,8 @@ def adopt_width(r):
     return None if w is None else int(w)
 
 
-def attr_input_paths(r):
-    model_file = r["wo_bias"] if r["model"] == "cbp" else r["weights"]
-    return [model_file, r["peaks"], config["genome"]["fasta"], config["genome"]["chrom_sizes"]]
-
-
 def attr_inputs(w):
-    return attr_input_paths(rundef(w))
+    return attr_input_paths(config, rundef(w))
 
 
 def attr_code(r):
@@ -161,8 +160,7 @@ def shard_outputs(w):
 ACTIVE = active_runs(config, sorted(config["runs"]))
 
 # A missing input would let snakemake keep an existing attr.npy without rerunning it.
-_missing = [f"{n}: {p}" for n in COMPUTED
-            for p in attr_input_paths(config["runs"][n]) if not Path(p).exists()]
+_missing = missing_attr_inputs(config)
 if _missing:
     raise WorkflowError("attribution inputs missing (cancel the run to freeze it):\n  "
                         + "\n  ".join(_missing))

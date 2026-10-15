@@ -11,14 +11,15 @@ valid one-hot; those peaks are listed in n_filled.tsv.
 Regions are processed in checkpointed chunks. Resuming onto chunks computed from other
 inputs is refused (chunk_identity.json).
 
-Runs in the compute env and must not import motifline.
+Runs in the compute env and must not import motifline (digests is a sibling file).
 """
 import argparse
 import hashlib
 import json
 import os
-import subprocess
 import sys
+
+from digests import file_sha256, git_commit
 
 
 def parse_args():
@@ -106,26 +107,6 @@ def track_row(meta, track, biosample):
         raise SystemExit(f"ATAC track {track} is {r['biosample_name']!r} ({r['track_name']}), "
                          f"not {biosample!r}")
     return r
-
-
-def file_sha256(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for block in iter(lambda: f.read(1 << 24), b""):
-            h.update(block)
-    return h.hexdigest()
-
-
-def git_commit(path):
-    """HEAD of the checkout holding `path`, plus a digest of uncommitted changes."""
-    def git(*args):
-        return subprocess.run(["git", "-C", path, *args], capture_output=True,
-                              check=True).stdout
-    try:
-        head, diff = git("rev-parse", "HEAD").decode().strip(), git("diff", "HEAD")
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    return head if not diff else f"{head}+{hashlib.sha256(diff).hexdigest()[:12]}"
 
 
 CHUNK_ARGS = ("track", "biosample", "head", "in_window", "crop", "n_shuffles",

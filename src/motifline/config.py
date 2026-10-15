@@ -295,5 +295,22 @@ def _paths(cfg: dict, runs: dict, base: Path) -> list[str]:
     return out
 
 
+def attr_inputs(cfg: dict, r: dict) -> list[str]:
+    """Files a computed run's attribution reads; the Snakefile declares them as inputs."""
+    model_file = r["wo_bias"] if r["model"] == "cbp" else r["weights"]
+    return [model_file, r["peaks"], cfg["genome"]["fasta"], cfg["genome"]["chrom_sizes"]]
+
+
+def missing_attr_inputs(cfg: dict, base=".") -> list[str]:
+    """`run: path` for each missing input of an active computed run."""
+    out = []
+    for name, r in sorted((cfg.get("runs") or {}).items()):
+        if r.get("adopt_from") or r.get("cancelled"):
+            continue
+        out += [f"{name}: {p}" for p in attr_inputs(cfg, r)
+                if not _resolve(Path(base), p).exists()]
+    return out
+
+
 def skeleton() -> str:
     return Path(__file__).with_name("config_skeleton.yaml").read_text()

@@ -272,3 +272,14 @@ def test_a_boolean_track_is_reported():
                              "peaks": "p.bed", "track": True, "biosample": "K562",
                              "chunk": 100}})
     assert only(problems(c, paths=False), "runs.g1.track")
+
+
+def test_missing_attr_inputs_skips_adopted_and_cancelled_runs(tmp_path):
+    from motifline.config import missing_attr_inputs
+    c = cfg_cbp()
+    c["runs"]["frozen"] = {"model": "cbp", "wo_bias": "/gone.pt", "peaks": "p.bed",
+                           "cancelled": True}
+    c["runs"]["adopted"] = {"model": "cbp", "adopt_from": "/gone", "rows": 1}
+    missing = missing_attr_inputs(c, base=tmp_path)
+    assert any(m.startswith("r1:") for m in missing)
+    assert not any(m.startswith(("frozen:", "adopted:")) for m in missing)

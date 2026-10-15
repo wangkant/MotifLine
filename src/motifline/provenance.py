@@ -1,7 +1,6 @@
 """run_info.json: argv, parameters, tool versions and model code behind a stage."""
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import platform
@@ -12,6 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from motifline import __version__
+from motifline.steps.digests import git_commit
 
 PACKAGES = ("finemo", "modisco-lite", "tangermeme", "torch", "numpy")
 
@@ -45,18 +45,6 @@ def tool_versions(env_prefix: str, packages: tuple[str, ...] = PACKAGES) -> dict
         return json.loads(done.stdout)
     except (subprocess.SubprocessError, OSError, ValueError) as e:
         return {"unavailable": f"{type(e).__name__}: {e}"}
-
-
-def git_commit(path) -> str | None:
-    """HEAD of the checkout holding `path`, plus a digest of uncommitted changes."""
-    def git(*args):
-        return subprocess.run(["git", "-C", str(path), *args], capture_output=True,
-                              check=True).stdout
-    try:
-        head, diff = git("rev-parse", "HEAD").decode().strip(), git("diff", "HEAD")
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    return head if not diff else f"{head}+{hashlib.sha256(diff).hexdigest()[:12]}"
 
 
 def record(out_dir, *, stage: str, argv, param_sig: str | None = None,
