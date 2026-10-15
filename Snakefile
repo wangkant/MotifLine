@@ -83,7 +83,7 @@ rule discover:
     log: "results/{run}/modisco/modisco.log"
     shell:
         "OMP_NUM_THREADS={threads} NUMBA_NUM_THREADS={threads} {ENV}/bin/modisco motifs -s {input[1]} -a {input[0]} -n {params.m[max_seqlets]} "
-        "-w {params.m[window]} -o {output} > {log} 2>&1"
+        "-w {params.m[window]} -l {params.m[n_leiden]} -o {output} > {log} 2>&1"
 
 
 rule extract_regions:
@@ -134,4 +134,5 @@ rule name_patterns:
     params: out="results/{run}/naming"
     shell:
         "{PY} {S}/name_patterns.py --h5 {input.h5} --target {input.lex} "
-        "--h14_annotation {input.h14} --tomtom {LEX[tomtom]} --out_dir {params.out}"
+        "--h14_annotation {input.h14} --tomtom {LEX[tomtom]} "
+        "--qval_threshold {LEX[qval_threshold]} --out_dir {params.out}"

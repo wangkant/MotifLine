@@ -2,7 +2,7 @@
 """Name MoDISco patterns by TomTom against the reference union.
 
 Each pattern is trimmed as in modiscolite's report (|CWM| >= 30% of max) and named after
-the gene symbol of its best match (lowest q, then p).
+the gene symbol of its best match (lowest q, then p); `confident` is q <= qval_threshold.
 """
 import argparse
 import json
@@ -20,6 +20,7 @@ HEADER = ("MEME version 4\n\nALPHABET= ACGT\n\nstrands: + -\n\n"
 ap = argparse.ArgumentParser()
 for k in ("h5", "target", "h14_annotation", "tomtom", "out_dir"):
     ap.add_argument(f"--{k}", required=True)
+ap.add_argument("--qval_threshold", type=float, default=0.05)
 a = ap.parse_args()
 os.makedirs(a.out_dir, exist_ok=True)
 
@@ -70,5 +71,6 @@ for p in pats:
         rec[f"tf{i}"] = symbol(h.Target_ID)
         rec[f"qval{i}"] = h.q_value
     rec["name"] = rec.get("tf0", "")
+    rec["confident"] = rec.get("qval0", np.nan) <= a.qval_threshold
     rows.append(rec)
 pd.DataFrame(rows).to_csv(f"{a.out_dir}/pattern_names.tsv", sep="\t", index=False)
