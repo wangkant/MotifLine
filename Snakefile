@@ -38,9 +38,13 @@ def sig_import_attr(w):
     r = rundef(w)
     # the declared width as recorded before, so finished runs keep their signature
     width = r.get("crop", r.get("in_window"))
-    return param_sig(src=r["adopt_from"], rows=r["rows"],
-                     width=None if width is None else int(width),
-                     peaks=r.get("adopt_peaks", "peaks.bed"))
+    kv = dict(src=r["adopt_from"], rows=r["rows"],
+              width=None if width is None else int(width),
+              peaks=r.get("adopt_peaks", "peaks.bed"))
+    if r.get("adopt_format") == "chrombpnet_h5":
+        kv.update(format="chrombpnet_h5", scores=r["adopt_scores"],
+                  fasta=config["genome"]["fasta"])
+    return param_sig(**kv)
 
 
 def sig_naming(w=None):
@@ -179,12 +183,22 @@ rule import_attr:
     run:
         r = rundef(wildcards)
         out = f"results/{wildcards.run}/attr"
-        argv = [ORCH_PY, "-m", "motifline.adopt", "--src_dir", r["adopt_from"], "--out_dir", out,
-                "--expected_rows", str(r["rows"]),
-                "--peaks_name", r.get("adopt_peaks", "peaks.bed")]
+        if r.get("adopt_format") == "chrombpnet_h5":
+            src = Path(r["adopt_from"])
+            argv = [PY, str(STEPS / "import_chrombpnet.py"),
+                    "--scores", str(src / r["adopt_scores"]),
+                    "--regions", str(src / r["adopt_peaks"]),
+                    "--fasta", config["genome"]["fasta"], "--out_dir", out,
+                    "--expected_rows", str(r["rows"])]
+            prefix = None
+        else:
+            argv = [ORCH_PY, "-m", "motifline.adopt", "--src_dir", r["adopt_from"],
+                    "--out_dir", out, "--expected_rows", str(r["rows"]),
+                    "--peaks_name", r.get("adopt_peaks", "peaks.bed")]
+            prefix = ORCH_PREFIX
         if adopt_width(r) is not None:
             argv += ["--expected_width", str(adopt_width(r))]
-        run_body(out, argv, "import_attr", prefix=ORCH_PREFIX, sig=params.sig,
+        run_body(out, argv, "import_attr", prefix=prefix, sig=params.sig,
                  checks=(hyp_check(),))
 
 rule attribute:

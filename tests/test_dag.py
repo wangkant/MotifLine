@@ -112,3 +112,18 @@ def test_a_cancelled_run_without_attr_is_an_error_when_targeted(tmp_path):
          "--directory", str(tmp_path), "--configfile", str(path),
          "--", "results/frozen/modisco/modisco.h5"], capture_output=True, text=True)
     assert r.returncode != 0 and "attr" in (r.stdout + r.stderr)
+
+
+def test_a_chrombpnet_h5_run_is_imported_by_the_compute_env_step(tmp_path):
+    cfg = _config(tmp_path)
+    cfg["runs"]["tf"] = {"model": "cbp", "adopt_from": str(tmp_path / "archive"),
+                         "adopt_format": "chrombpnet_h5", "adopt_scores": "k.counts_scores.h5",
+                         "adopt_peaks": "k.interpreted_regions.bed", "rows": 10}
+    path = tmp_path / "cfg.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+    r = subprocess.run(
+        [sys.executable, "-m", "snakemake", "-n", "-p", "--snakefile", str(REPO / "Snakefile"),
+         "--directory", str(tmp_path), "--configfile", str(path),
+         "--", "results/tf/attr/attr.npy"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "import_attr" in r.stdout + r.stderr

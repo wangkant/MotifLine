@@ -283,3 +283,30 @@ def test_missing_attr_inputs_skips_adopted_and_cancelled_runs(tmp_path):
     missing = missing_attr_inputs(c, base=tmp_path)
     assert any(m.startswith("r1:") for m in missing)
     assert not any(m.startswith(("frozen:", "adopted:")) for m in missing)
+
+
+def _h5_run(**over):
+    r = {"model": "cbp", "adopt_from": "/arch", "adopt_format": "chrombpnet_h5",
+         "adopt_scores": "k.counts_scores.h5", "adopt_peaks": "k.interpreted_regions.bed",
+         "rows": 10}
+    r.update(over)
+    return r
+
+
+def test_a_chrombpnet_h5_run_is_valid_and_needs_the_genome():
+    c = cfg_cbp(runs={"tf": _h5_run()})
+    assert problems(c, paths=False) == []
+    del c["genome"]
+    assert only(problems(c, paths=False), "genome.fasta")
+
+
+def test_a_chrombpnet_h5_run_names_both_files_and_is_cbp():
+    r = _h5_run(model="ag")
+    del r["adopt_scores"]
+    p = problems(cfg_cbp(runs={"tf": r}), paths=False)
+    assert only(p, "runs.tf.adopt_scores") and only(p, "cbp format")
+
+
+def test_an_unknown_adopt_format_is_reported():
+    assert only(problems(cfg_cbp(runs={"tf": _h5_run(adopt_format="bigwig")}), paths=False),
+                "adopt_format")

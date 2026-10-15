@@ -31,6 +31,18 @@ runs:
     in_window: 2048
     crop: 2048
 
+  # Official TensorFlow ChromBPNet output: <prefix>.counts_scores.h5 and
+  # <prefix>.interpreted_regions.bed from its interpret step, in one directory. Every
+  # row is checked against genome.fasta before it is written.
+  k562_cbp_tf:
+    model: cbp
+    adopt_from: /path/to/chrombpnet_interpret
+    adopt_format: chrombpnet_h5
+    adopt_scores: k562.counts_scores.h5
+    adopt_peaks: k562.interpreted_regions.bed
+    rows: 10000
+    in_window: 2114
+
   # Attributions computed elsewhere: attr.npy, ohe.npy and a peaks bed in one directory.
   # `rows` is the row count the arrays must have. `cancelled: true` keeps a run out of
   # the default targets and freezes its attr/.

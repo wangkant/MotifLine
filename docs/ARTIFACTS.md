@@ -64,6 +64,16 @@ they are deleted.
 
 ## `import_attr` → `attr/`
 
+With `adopt_format: chrombpnet_h5`, the three files are written, not linked:
+`attr.npy` is `/shap/seq` of chrombpnet's `counts_scores.h5` (hypothetical, float16
+in the file, float32 here), `ohe.npy` is `/raw/seq`, and `regions.bed` is
+`interpreted_regions.bed` (10 columns). Nothing is written unless `/shap` is nonzero
+off the observed base (hypothetical, not projected), `/projected_shap` equals
+`raw * shap`, and every row's one-hot equals `genome.fasta` at `start + summit ± W/2`. chrombpnet keeps peaks with non-ACGT bases (all-zero
+columns), so these arrays can contain them; the count is printed in the stage log.
+
+Otherwise (`npy`):
+
 The same three files. `attr.npy` and `ohe.npy` are absolute symlinks to the adopted
 arrays; only `regions.bed` is written. Rows are checked against the run's `rows:`,
 attr and ohe widths against each other and against the declared width (`crop` for

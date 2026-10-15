@@ -128,7 +128,8 @@ and cancelled runs, along with shared parameters and reference settings.
 |---|---|
 | `model: cbp` or `model: ag` | Select ChromBPNet or AlphaGenome. |
 | `track` + `biosample` (AG) | ATAC head index and the biosample it must be. |
-| `adopt_from` | Reuse archived attributions and run downstream stages. |
+| `adopt_from` | Reuse attributions computed elsewhere (`attr.npy` + `ohe.npy`) and run downstream stages. |
+| `adopt_format: chrombpnet_h5` | Import official TensorFlow ChromBPNet `counts_scores.h5` + `interpreted_regions.bed`, checked row by row against the genome. |
 | `n_shards` | Split attribution into GPU shards, then merge the results. |
 | Neither `adopt_from` nor `n_shards` | Compute attributions in one process. |
 | `cancelled: true` | Exclude the run from default targets and freeze its `attr/`: it is never recomputed or re-adopted, and downstream stages can still be rebuilt from it by explicit target. |
@@ -190,7 +191,7 @@ the underlying tools and methods relevant to your analysis.
 
 | tool | version here | where |
 |---|---|---|
-| ChromBPNet (official, TensorFlow; attributions adopted with `adopt_from`) | — | github.com/kundajelab/chrombpnet |
+| ChromBPNet (official, TensorFlow; contribution scores imported with `adopt_format: chrombpnet_h5`) | — | github.com/kundajelab/chrombpnet |
 | ChromBPNet (PyTorch port; the `attribute` rule) | `jsxlei/chrombpnet-pytorch@01ad10b` | github.com/jsxlei/chrombpnet-pytorch |
 | AlphaGenome (the model) | — | github.com/google-deepmind/alphagenome |
 | AlphaGenome PyTorch port | `genomicsxai/alphagenome-pytorch` | github.com/genomicsxai/alphagenome-pytorch |

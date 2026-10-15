@@ -67,8 +67,11 @@ up in `alphagenome_pytorch/data/track_metadata_human.parquet` and refuses a mism
 Model weights: a ChromBPNet run needs a bias-corrected PyTorch state dict for
 `BPNet(512 filters, 8 layers)` (`wo_bias`); Keras `.h5` models are not read. An
 AlphaGenome run needs `weights` loadable by `AlphaGenome.from_pretrained`.
-Attributions computed elsewhere (e.g. with the official TensorFlow ChromBPNet) can be
-adopted with `adopt_from`.
+Official TensorFlow ChromBPNet results are imported rather than computed: point an
+adopted run at the directory holding `<prefix>.counts_scores.h5` and
+`<prefix>.interpreted_regions.bed` from chrombpnet's interpret step, with
+`adopt_format: chrombpnet_h5` (see `config/example.yaml`). The import needs
+`genome.fasta`, the same genome chrombpnet read.
 
 ## 4. Reference data
 

@@ -26,7 +26,10 @@ MODEL_KEYS = {
 }
 
 ADOPTED_REQUIRED = ("adopt_from", "rows")
-ADOPTED_OPTIONAL = {"adopt_peaks", "crop"}
+ADOPTED_OPTIONAL = {"adopt_peaks", "crop", "adopt_format", "adopt_scores"}
+
+# npy: attr.npy + ohe.npy + a peaks bed; chrombpnet_h5: official ChromBPNet interpret output
+ADOPT_FORMATS = ("npy", "chrombpnet_h5")
 
 TOP_LEVEL_KEYS = {"envs", "chrombpnet_src", "genome", "attribution",
                   "modisco", "finemo", "reference_lexicon", "runs"}
@@ -117,6 +120,9 @@ def _structure(cfg: dict, runs: dict) -> list[str]:
         out += _require(cfg, dotted)
 
     computed = _computed_models(runs)
+    if any(isinstance(r, dict) and r.get("adopt_format") == "chrombpnet_h5"
+           for r in runs.values()):
+        out += _require(cfg, "genome.fasta")
     if computed:
         out += _require(cfg, "genome.fasta") + _require(cfg, "genome.chrom_sizes")
         out += _require(cfg, "chrombpnet_src")
@@ -167,6 +173,15 @@ def _run_structure(name: str, r) -> list[str]:
     if track is not None and not (isinstance(track, int) and not isinstance(track, bool)
                                   and track >= 0):
         out.append(f"runs.{name}.track: must be a non-negative integer, not {track!r}")
+    fmt = r.get("adopt_format", "npy")
+    if fmt not in ADOPT_FORMATS:
+        out.append(f"runs.{name}.adopt_format: {fmt!r} is not one of {list(ADOPT_FORMATS)}")
+    if fmt == "chrombpnet_h5":
+        for key in ("adopt_scores", "adopt_peaks"):
+            if key not in r:
+                out.append(f"runs.{name}.{key}: required with adopt_format: chrombpnet_h5")
+        if model != "cbp":
+            out.append(f"runs.{name}.model: adopt_format chrombpnet_h5 is a cbp format")
     if r.get("n_shards") and adopted:
         out.append(f"runs.{name}.n_shards: an adopted run computes nothing to shard")
     if "rows" in r and not adopted and not r.get("n_shards"):
@@ -292,6 +307,11 @@ def _paths(cfg: dict, runs: dict, base: Path) -> list[str]:
                            / "track_metadata_human.parquet")
         if "peaks" in r:
             out += _narrowpeak(base, f"runs.{name}.peaks", r["peaks"], sizes)
+        if r.get("adopt_format") == "chrombpnet_h5" and "adopt_from" in r:
+            for key in ("adopt_scores", "adopt_peaks"):
+                if key in r:
+                    out += _exists(base, f"runs.{name}.{key}",
+                                   _resolve(base, r["adopt_from"]) / r[key])
     return out
 
 

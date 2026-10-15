@@ -28,3 +28,5 @@ dependencies:
       - safetensors==0.7.0
       # reads AlphaGenome's track metadata
       - pyarrow==17.0.0
+      # reads official ChromBPNet contribution h5 (blosc)
+      - tables==3.10.1
