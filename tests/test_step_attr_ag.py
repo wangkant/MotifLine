@@ -77,3 +77,24 @@ def test_chunks_from_other_inputs_are_refused(tmp_path):
 
 def test_crop_center_keeps_the_middle():
     assert list(attr_ag.crop_center(np.arange(10), 4)) == [3, 4, 5, 6]
+
+
+def _onehot(seq):
+    x = np.zeros((4, len(seq)), np.float32)
+    for j, b in enumerate(seq):
+        if b in "ACGT":
+            x["ACGT".index(b), j] = 1
+    return x
+
+
+def test_a_peak_with_n_inside_the_kept_window_is_dropped():
+    assert not attr_ag.clean_in_crop(_onehot("ACGTANGTAC"), 4)      # N at 5, crop is 3..6
+    assert attr_ag.clean_in_crop(_onehot("NCGTACGTAN"), 4)          # N only in the flanks
+
+
+def test_flank_n_is_filled_with_a_and_counted():
+    x = _onehot("NCGTACGTAN")[None]
+    assert attr_ag.fill_with_a(x) == 2
+    assert (x.sum(1) == 1).all()
+    assert x[0, 0, 0] == 1 and x[0, 0, 9] == 1
+    assert attr_ag.fill_with_a(_onehot("ACGT")[None]) == 0

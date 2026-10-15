@@ -93,7 +93,8 @@ def main():
     # in_window is passed so the edge filter matches the window get_seq fetches.
     regions_df = load_region_df(normalize_peaks_bed(a.peaks, a.out_dir),
                                 chrom_sizes=a.chrom_sizes, in_window=a.in_window)
-    center = regions_df["chr"] + ":" + (regions_df["start"] + regions_df["summit"]).astype(str)
+    center = (regions_df["chr"].astype(str) + ":"
+              + (regions_df["start"] + regions_df["summit"]).astype(str))
     if center.duplicated().any():
         raise SystemExit(f"{a.peaks}: {int(center.duplicated().sum())} peaks share a summit "
                          f"with an earlier peak")

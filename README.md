@@ -131,7 +131,7 @@ and cancelled runs, along with shared parameters and reference settings.
 | `adopt_from` | Reuse archived attributions and run downstream stages. |
 | `n_shards` | Split attribution into GPU shards, then merge the results. |
 | Neither `adopt_from` nor `n_shards` | Compute attributions in one process. |
-| `cancelled: true` | Exclude the run from default targets; explicit targets remain available. |
+| `cancelled: true` | Exclude the run from default targets and freeze its `attr/`: it is never recomputed or re-adopted, and downstream stages can still be rebuilt from it by explicit target. |
 
 The configuration follows upstream tool defaults where applicable and documents
 explicit choices where required. `motifline check` reports where parameters deviate

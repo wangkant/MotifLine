@@ -72,6 +72,21 @@ def crop_center(arr, w):
     return arr[..., s:s + w]
 
 
+def clean_in_crop(onehot_4xl, crop):
+    """True when the central `crop` columns are all ACGT (no all-zero column)."""
+    return not crop_center(onehot_4xl.sum(0) < 0.5, crop).any()
+
+
+def fill_with_a(x):
+    """Set the non-ACGT columns of a (1, 4, L) one-hot to A in place; return how many."""
+    bad = x[0].sum(0) < 0.5
+    n = int(bad.sum())
+    if n:
+        x[0, :, bad] = 0.0
+        x[0, 0, bad] = 1.0
+    return n
+
+
 _NARROWPEAK_FILLER = ["."] * 6
 
 
@@ -171,7 +186,7 @@ def main():
     fasta = pyfaidx.Fasta(a.fasta)
     seqs = [window_seq(fasta, r.chr, int(r.start + r.summit), a.in_window)
             for r in df.itertuples(index=False)]
-    keep = [not crop_center((onehot(s).sum(0) < 0.5).numpy(), a.crop).any() for s in seqs]
+    keep = [clean_in_crop(onehot(s).numpy(), a.crop) for s in seqs]
     n_drop = len(keep) - sum(keep)
     df = df[np.array(keep, dtype=bool)].reset_index(drop=True)
     seqs = [s for s, k in zip(seqs, keep, strict=True) if k]
@@ -202,11 +217,7 @@ def main():
 
     def attr_one(i):
         x = torch.stack([onehot(seqs[i])])
-        bad = x[0].sum(0) < 0.5
-        n_fill = int(bad.sum())
-        if n_fill:
-            x[0, :, bad] = 0.0
-            x[0, 0, bad] = 1.0
+        n_fill = fill_with_a(x)
         with torch.cuda.device(0):
             attr = deep_lift_shap(
                 wrapper, x, target=0, batch_size=a.batch_size,

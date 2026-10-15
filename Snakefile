@@ -12,7 +12,7 @@ from snakemake.exceptions import WorkflowError
 from motifline import naming as nm
 from motifline.attribution import hyp_check
 from motifline.config import check as check_config
-from motifline.runs import active_runs
+from motifline.runs import active_runs, cancelled_runs
 from motifline.stages import run_body as _run_body
 
 if not config:
@@ -133,9 +133,14 @@ def sig_attr(w, shard_i=None):
 ORCH_PY = sys.executable
 ORCH_PREFIX = sys.prefix
 
-# attr/ has three producers; run names are partitioned between them.
-ADOPTED = sorted(k for k, v in config["runs"].items() if v.get("adopt_from"))
-COMPUTED = sorted(k for k, v in config["runs"].items() if not v.get("adopt_from"))
+# attr/ has three producers; run names are partitioned between them. A cancelled run
+# has none: its attr/ is frozen, so downstream stages can be rebuilt from it but it is
+# never recomputed, and a missing attr/ is an error rather than a silent reuse.
+CANCELLED = set(cancelled_runs(config))
+ADOPTED = sorted(k for k, v in config["runs"].items()
+                 if v.get("adopt_from") and k not in CANCELLED)
+COMPUTED = sorted(k for k, v in config["runs"].items()
+                  if not v.get("adopt_from") and k not in CANCELLED)
 SHARDED = sorted(k for k in COMPUTED if config["runs"][k].get("n_shards"))
 SINGLE = sorted(k for k in COMPUTED if not config["runs"][k].get("n_shards"))
 
@@ -156,7 +161,7 @@ def shard_outputs(w):
 ACTIVE = active_runs(config, sorted(config["runs"]))
 
 # A missing input would let snakemake keep an existing attr.npy without rerunning it.
-_missing = [f"{n}: {p}" for n in ACTIVE if not config["runs"][n].get("adopt_from")
+_missing = [f"{n}: {p}" for n in COMPUTED
             for p in attr_input_paths(config["runs"][n]) if not Path(p).exists()]
 if _missing:
     raise WorkflowError("attribution inputs missing (cancel the run to freeze it):\n  "

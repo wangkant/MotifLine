@@ -33,7 +33,7 @@ runs:
 
   # Attributions computed elsewhere: attr.npy, ohe.npy and a peaks bed in one directory.
   # `rows` is the row count the arrays must have. `cancelled: true` keeps a run out of
-  # the default targets.
+  # the default targets and freezes its attr/.
   k562_cbp_archived:
     model: cbp
     adopt_from: /path/to/archived_attributions

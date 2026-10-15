@@ -265,3 +265,10 @@ def test_qval_threshold_must_be_a_probability():
     c = cfg_cbp()
     c["reference_lexicon"]["qval_threshold"] = 5
     assert only(problems(c, paths=False), "qval_threshold")
+
+
+def test_a_boolean_track_is_reported():
+    c = cfg_cbp(runs={"g1": {"model": "ag", "ag_src": "/a", "weights": "/m/w.pt",
+                             "peaks": "p.bed", "track": True, "biosample": "K562",
+                             "chunk": 100}})
+    assert only(problems(c, paths=False), "runs.g1.track")

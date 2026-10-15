@@ -72,3 +72,43 @@ def test_a_missing_attribution_input_stops_the_dag(tmp_path):
     cfg["runs"]["single"]["wo_bias"] = str(tmp_path / "moved.pt")
     r = _dry_run(tmp_path, cfg)
     assert r.returncode != 0 and "moved.pt" in (r.stdout + r.stderr)
+
+
+def _frozen(tmp_path, with_attr):
+    cfg = _config(tmp_path)
+    cfg["runs"]["frozen"] = {"model": "cbp", "wo_bias": str(tmp_path / "gone.pt"),
+                             "peaks": cfg["runs"]["single"]["peaks"], "cancelled": True}
+    if with_attr:
+        d = tmp_path / "results/frozen/attr"
+        d.mkdir(parents=True)
+        for f in ("attr.npy", "ohe.npy", "regions.bed"):
+            (d / f).write_text("x")
+    return cfg
+
+
+def test_a_cancelled_run_with_missing_inputs_does_not_block_the_rest(tmp_path):
+    assert _dry_run(tmp_path, _frozen(tmp_path, with_attr=False)).returncode == 0
+
+
+def test_a_cancelled_run_is_rebuilt_from_its_frozen_attr_without_recomputing(tmp_path):
+    cfg = _frozen(tmp_path, with_attr=True)
+    path = tmp_path / "cfg.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+    r = subprocess.run(
+        [sys.executable, "-m", "snakemake", "-n", "-q", "rules", "--snakefile",
+         str(REPO / "Snakefile"), "--directory", str(tmp_path), "--configfile", str(path),
+         "--", "results/frozen/modisco/modisco.h5"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    out = r.stdout + r.stderr
+    assert "discover" in out and "attribute" not in out
+
+
+def test_a_cancelled_run_without_attr_is_an_error_when_targeted(tmp_path):
+    cfg = _frozen(tmp_path, with_attr=False)
+    path = tmp_path / "cfg.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+    r = subprocess.run(
+        [sys.executable, "-m", "snakemake", "-n", "--snakefile", str(REPO / "Snakefile"),
+         "--directory", str(tmp_path), "--configfile", str(path),
+         "--", "results/frozen/modisco/modisco.h5"], capture_output=True, text=True)
+    assert r.returncode != 0 and "attr" in (r.stdout + r.stderr)

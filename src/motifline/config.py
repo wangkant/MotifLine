@@ -164,7 +164,8 @@ def _run_structure(name: str, r) -> list[str]:
         if v is not None and not (isinstance(v, int) and not isinstance(v, bool) and v > 0):
             out.append(f"runs.{name}.{key}: must be a positive integer, not {v!r}")
     track = r.get("track")
-    if track is not None and not (isinstance(track, int) and track >= 0):
+    if track is not None and not (isinstance(track, int) and not isinstance(track, bool)
+                                  and track >= 0):
         out.append(f"runs.{name}.track: must be a non-negative integer, not {track!r}")
     if r.get("n_shards") and adopted:
         out.append(f"runs.{name}.n_shards: an adopted run computes nothing to shard")
