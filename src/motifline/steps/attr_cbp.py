@@ -5,11 +5,17 @@ Uses chrombpnet-pytorch's own _deep_lift_shap. A peak whose window contains a no
 base is dropped. Sharded runs split the peak list into contiguous slices before that
 filter and write attr_<i>.npy / ohe_<i>.npy / regions_<i>.bed.
 
+tangermeme's convergence check runs at its default threshold and is recorded in
+convergence.json rather than switched off.
+
 Runs in the compute env and must not import motifline.
 """
 import argparse
+import json
 import os
 import sys
+
+from convergence import THRESHOLD, Deltas, summary
 
 
 def parse_args():
@@ -120,10 +126,17 @@ def main():
     print(f"[attr_cbp] {len(regions_df)} peaks ({n_in} in bounds); "
           f"{int((~keep).sum())} dropped for non-ACGT bases", flush=True)
 
-    attr = _deep_lift_shap(model.to("cuda"), seq, batch_size=a.batch_size, verbose=True,
-                           args=None, warning_threshold=1e8, device="cuda",
-                           n_shuffles=a.n_shuffles,
-                           hypothetical=a.hypothetical, random_state=a.random_state)
+    with Deltas() as d:
+        attr = _deep_lift_shap(model.to("cuda"), seq, batch_size=a.batch_size, verbose=True,
+                               args=None, warning_threshold=THRESHOLD, device="cuda",
+                               n_shuffles=a.n_shuffles,
+                               hypothetical=a.hypothetical, random_state=a.random_state)
+    conv = summary(len(seq) * a.n_shuffles, d.over, d.max)
+    with open(os.path.join(a.out_dir, f"convergence{suffix}.json"), "w") as fh:
+        json.dump(conv, fh, indent=2)
+    print(f"[attr_cbp] DeepLIFT convergence: {conv['pairs_over']} of {conv['pairs']} "
+          f"(sequence, reference) pairs over {THRESHOLD}; max delta {conv['max_delta']:.3g}",
+          flush=True)
     attr = attr.cpu().numpy() if isinstance(attr, torch.Tensor) else np.asarray(attr)
     np.save(os.path.join(a.out_dir, f"attr{suffix}.npy"), attr.astype(np.float32))
     np.save(os.path.join(a.out_dir, f"ohe{suffix}.npy"), seq.cpu().numpy().astype(np.int8))

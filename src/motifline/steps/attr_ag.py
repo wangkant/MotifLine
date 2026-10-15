@@ -8,6 +8,9 @@ A peak whose kept window (central `crop` bp) contains a non-ACGT base is dropped
 the ChromBPNet path. Non-ACGT bases outside the kept window are set to A so the input is
 valid one-hot; those peaks are listed in n_filled.tsv.
 
+tangermeme's convergence check runs at its default threshold and is recorded in
+convergence.json rather than switched off.
+
 Regions are processed in checkpointed chunks. Resuming onto chunks computed from other
 inputs is refused (chunk_identity.json).
 
@@ -19,6 +22,7 @@ import json
 import os
 import sys
 
+from convergence import THRESHOLD, Deltas, summary
 from digests import file_sha256, git_commit
 
 
@@ -199,32 +203,37 @@ def main():
     def attr_one(i):
         x = torch.stack([onehot(seqs[i])])
         n_fill = fill_with_a(x)
-        with torch.cuda.device(0):
+        with torch.cuda.device(0), Deltas() as d:
             attr = deep_lift_shap(
                 wrapper, x, target=0, batch_size=a.batch_size,
                 references=deeplift.local_dinucleotide_shuffle, n_shuffles=a.n_shuffles,
-                warning_threshold=1e8, additional_nonlinear_ops=ops,
+                warning_threshold=THRESHOLD, additional_nonlinear_ops=ops,
                 hypothetical=True, device="cuda", random_state=a.random_state)
         return (crop_center(attr.cpu().numpy().astype(np.float32), a.crop),
-                crop_center(x.numpy().astype(np.int8), a.crop), n_fill)
+                crop_center(x.numpy().astype(np.int8), a.crop), n_fill, d)
 
     n = len(df)
     n_chunks = (n + a.chunk - 1) // a.chunk
     for c in range(n_chunks):
         af, of, ff = f"{cdir}/attr_{c}.npy", f"{cdir}/ohe_{c}.npy", f"{cdir}/n_filled_{c}.tsv"
-        if os.path.exists(af) and os.path.exists(of) and os.path.exists(ff):
+        cf = f"{cdir}/convergence_{c}.json"
+        if all(os.path.exists(p) for p in (af, of, ff, cf)):
             print(f"  chunk {c}/{n_chunks} exists, skipped", flush=True)
             continue
-        aa, oo, filled = [], [], []
-        for i in range(c * a.chunk, min((c + 1) * a.chunk, n)):
-            at, oh, n_fill = attr_one(i)
+        aa, oo, filled, over, worst = [], [], [], 0, 0.0
+        rows = range(c * a.chunk, min((c + 1) * a.chunk, n))
+        for i in rows:
+            at, oh, n_fill, d = attr_one(i)
             aa.append(at); oo.append(oh)
+            over, worst = over + d.over, max(worst, d.max)
             if n_fill:
                 r = df.iloc[i]
                 filled.append((r["chr"], int(r["start"]), int(r["summit"]), n_fill))
         np.save(af, np.concatenate(aa, 0)); np.save(of, np.concatenate(oo, 0))
         with open(ff, "w") as fh:
             fh.writelines("\t".join(map(str, row)) + "\n" for row in filled)
+        with open(cf, "w") as fh:
+            json.dump(summary(len(rows) * a.n_shuffles, over, worst), fh)
         print(f"  chunk {c + 1}/{n_chunks} saved", flush=True)
 
     attr = np.concatenate([np.load(f"{cdir}/attr_{c}.npy") for c in range(n_chunks)], 0)
@@ -244,6 +253,14 @@ def main():
                 fh.write(line)
                 n_filled += 1
     print(f"[attr_ag] {n_filled} peaks with non-ACGT bases outside the kept window set to A",
+          flush=True)
+    parts = [json.load(open(f"{cdir}/convergence_{c}.json")) for c in range(n_chunks)]
+    conv = summary(sum(p["pairs"] for p in parts), sum(p["pairs_over"] for p in parts),
+                   max(p["max_delta"] for p in parts))
+    with open(f"{a.out_dir}/convergence{suffix}.json", "w") as fh:
+        json.dump(conv, fh, indent=2)
+    print(f"[attr_ag] DeepLIFT convergence: {conv['pairs_over']} of {conv['pairs']} "
+          f"(sequence, reference) pairs over {THRESHOLD}; max delta {conv['max_delta']:.3g}",
           flush=True)
     print(f"DONE attr={attr.shape}", flush=True)
 

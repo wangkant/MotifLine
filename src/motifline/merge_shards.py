@@ -4,8 +4,19 @@ Shard i must be the i-th directory given: shard order is row order.
 """
 from __future__ import annotations
 import argparse
+import json
 from pathlib import Path
 import numpy as np
+
+
+def _side_files(shard_dirs, name, ext):
+    """Every shard's <name>_<i>.<ext>, or [] when no shard has one."""
+    paths = [Path(d) / f"{name}_{i}.{ext}" for i, d in enumerate(shard_dirs)]
+    have = [p.exists() for p in paths]
+    if any(have) and not all(have):
+        raise FileNotFoundError(f"{name}_<i>.{ext} is missing from some shards: "
+                                f"{[str(p) for p, h in zip(paths, have, strict=True) if not h]}")
+    return paths if all(have) else []
 
 
 def merge_shards(shard_dirs, out_dir, expected_rows: int | None = None) -> dict:
@@ -31,12 +42,26 @@ def merge_shards(shard_dirs, out_dir, expected_rows: int | None = None) -> dict:
     n = sum(len(A) for A in attrs)
     if expected_rows is not None and n != expected_rows:
         raise ValueError(f"shards hold {n} rows, expected {expected_rows}")
+    filled = _side_files(shard_dirs, "n_filled", "tsv")
+    conv = [json.loads(p.read_text()) for p in _side_files(shard_dirs, "convergence", "json")]
+    if len({c["threshold"] for c in conv}) > 1:
+        raise ValueError("shards used different convergence thresholds")
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     attr = np.concatenate(attrs, 0)
     np.save(out / "attr.npy", attr)
     np.save(out / "ohe.npy", np.concatenate(ohes, 0))
     (out / "regions.bed").write_text("".join(r + "\n" for r in beds))
+    if filled:
+        lines = [p.read_text().splitlines() for p in filled]
+        (out / "n_filled.tsv").write_text(
+            "\n".join([lines[0][0]] + [ln for f in lines for ln in f[1:] if ln]) + "\n")
+    if conv:
+        (out / "convergence.json").write_text(json.dumps({
+            "threshold": conv[0]["threshold"],
+            "pairs": sum(c["pairs"] for c in conv),
+            "pairs_over": sum(c["pairs_over"] for c in conv),
+            "max_delta": max(c["max_delta"] for c in conv)}, indent=2))
     return {"n_shards": len(shard_dirs), "rows": int(n),
             "width": int(attr.shape[-1]), "per_shard": per_shard}
 

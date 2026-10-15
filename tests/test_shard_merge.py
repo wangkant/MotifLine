@@ -99,3 +99,30 @@ def test_a_short_merge_is_refused_before_anything_is_written(tmp_path):
     with pytest.raises(ValueError, match="expected 3"):
         merge_shards([tmp_path / "s0"], tmp_path / "merged", expected_rows=3)
     assert not (tmp_path / "merged").exists()
+
+
+def test_side_files_are_merged_across_shards(tmp_path):
+    import json
+    a = np.zeros((1, 4, 6), np.float32)
+    for i in range(2):
+        d = tmp_path / f"s{i}"
+        _write_shard(d, i, a, a.astype(np.int8), [f"r{i}"])
+        (d / f"n_filled_{i}.tsv").write_text("chr\tstart\tsummit\tn_filled\n"
+                                             + (f"chr1\t{i}\t5\t2\n" if i else ""))
+        (d / f"convergence_{i}.json").write_text(json.dumps(
+            {"threshold": 1e-3, "pairs": 20, "pairs_over": i, "max_delta": 0.1 * i}))
+    merge_shards([tmp_path / "s0", tmp_path / "s1"], tmp_path / "m")
+    assert (tmp_path / "m/n_filled.tsv").read_text() == \
+        "chr\tstart\tsummit\tn_filled\nchr1\t1\t5\t2\n"
+    conv = json.loads((tmp_path / "m/convergence.json").read_text())
+    assert conv == {"threshold": 1e-3, "pairs": 40, "pairs_over": 1, "max_delta": 0.1}
+
+
+def test_a_side_file_missing_from_one_shard_is_refused(tmp_path):
+    a = np.zeros((1, 4, 6), np.float32)
+    for i in range(2):
+        _write_shard(tmp_path / f"s{i}", i, a, a.astype(np.int8), [f"r{i}"])
+    (tmp_path / "s0/n_filled_0.tsv").write_text("chr\tstart\tsummit\tn_filled\n")
+    with pytest.raises(FileNotFoundError, match="n_filled"):
+        merge_shards([tmp_path / "s0", tmp_path / "s1"], tmp_path / "m")
+    assert not (tmp_path / "m").exists()

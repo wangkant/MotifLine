@@ -1,6 +1,7 @@
 # What each stage writes
 
-A stage directory holds the files listed below plus a `run_info.json`. A stage that
+A stage directory holds the files listed below plus `run_info.json` and
+`stage.log` (everything the body printed, stderr included). A stage that
 crashed part way can leave partial files with the final names; treat a directory as
 finished only once its target has rerun cleanly.
 
@@ -48,8 +49,16 @@ can keep slightly different peaks, so join on `regions.bed`, never on the peak f
 
 When AG's input is wider than `crop`, non-ACGT bases in the flanks are set to `A` so
 the input is valid one-hot. `n_filled.tsv` (`chr, start, summit, n_filled`) lists
-those peaks; an empty table means none. Sharded runs keep `n_filled_<i>.tsv` in each
-`attr_shards/shard_<i>/`; it is not merged.
+those peaks; an empty table means none.
+
+`convergence.json` (both models) records tangermeme's DeepLIFT check: for each
+(sequence, reference) pair, |f(x) − f(ref) − Σ attributions|. It holds the threshold
+(1e-3, tangermeme's default), the number of pairs, how many exceeded it and the largest
+delta. Nothing is decided on it; a large share over the threshold means the
+attribution rules do not satisfy summation-to-delta for this model.
+
+Sharded runs write `n_filled_<i>.tsv` / `convergence_<i>.json` per shard;
+`merge_shards` combines them into `attr/`.
 
 ### AG chunk checkpoints: `_chunks/` (`_chunks_<i>/` when sharded)
 

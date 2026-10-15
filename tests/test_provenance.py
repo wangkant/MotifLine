@@ -4,7 +4,11 @@ from __future__ import annotations
 import json
 import sys
 
+import pytest
+
 from motifline.provenance import record, tool_versions
+
+posix = pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell, paths and env layout")
 
 
 def test_record_writes_run_info_naming_the_stage_and_the_command(tmp_path):
@@ -45,6 +49,7 @@ def test_record_creates_the_stage_directory_if_it_is_missing(tmp_path):
     assert (out / "run_info.json").exists()
 
 
+@posix
 def test_argv_is_stringified_so_paths_survive_json(tmp_path):
     from pathlib import Path
     record(tmp_path, stage="discover", argv=[Path("/e/bin/modisco"), 400])
@@ -52,6 +57,7 @@ def test_argv_is_stringified_so_paths_survive_json(tmp_path):
     assert info["argv"] == ["/e/bin/modisco", "400"]
 
 
+@posix
 def test_tool_versions_reports_a_present_package_and_a_missing_one(tmp_path):
     got = tool_versions(sys.prefix, packages=("pytest", "no-such-package-xyz"))
     assert isinstance(got["pytest"], str) and got["pytest"]
@@ -63,6 +69,7 @@ def test_tool_versions_on_a_broken_env_reports_why_instead_of_raising(tmp_path):
     assert "unavailable" in got
 
 
+@posix
 def test_record_embeds_the_versions_of_the_env_that_ran_the_stage(tmp_path):
     record(tmp_path, stage="discover", argv=["x"], env_prefix=sys.prefix,
            packages=("pytest",))

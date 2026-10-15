@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 
 import pytest
 
 from motifline.stages import run_body
+
+posix = pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell, paths and env layout")
 
 
 def test_the_stage_directory_is_created_before_the_body_runs(tmp_path):
@@ -40,6 +43,7 @@ def test_the_parameter_signature_is_carried_into_the_label(tmp_path):
     assert info["param_sig"] == '{"threshold": 0.3}'
 
 
+@posix
 def test_extra_environment_reaches_the_child(tmp_path):
     target = tmp_path / "seen.txt"
     run_body(tmp_path, ["sh", "-c", f"echo $NUMBA_NUM_THREADS > {target}"],
@@ -61,6 +65,7 @@ def test_path_arguments_survive_into_the_label(tmp_path):
 
 # --- post-run checks ---------------------------------------------------------
 
+@posix
 def test_a_check_runs_after_the_body_and_lands_in_the_label(tmp_path):
     def saw_the_output(out_dir):
         return {"body_wrote": (out_dir / "made.txt").read_text().strip()}
@@ -95,3 +100,9 @@ def test_a_failed_rerun_removes_the_old_label(tmp_path):
     with pytest.raises(subprocess.CalledProcessError):
         run_body(tmp_path, ["false"], stage="discover")
     assert not (tmp_path / "run_info.json").exists()
+
+
+@posix
+def test_the_body_output_is_kept_in_stage_log(tmp_path):
+    run_body(tmp_path, ["sh", "-c", "echo out; echo err >&2"], stage="discover")
+    assert (tmp_path / "stage.log").read_text().split() == ["out", "err"]
