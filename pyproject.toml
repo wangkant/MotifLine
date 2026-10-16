@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "motifline"
-version = "0.1.0.dev0"
+dynamic = ["version"]
 description = "Attribution -> MoDISco -> FiNeMo, one line per run, for ChromBPNet and AlphaGenome"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,14 +13,17 @@ license-files = ["LICENSE", "NOTICE", "licenses/Apache-2.0.txt"]
 authors = [{ name = "Qiankang Wang" }]
 keywords = ["genomics", "regulatory", "motifs", "chrombpnet", "modisco", "snakemake"]
 classifiers = [
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Operating System :: POSIX",
     "Programming Language :: Python :: 3",
 ]
 # pyyaml is a runtime dependency, not a test one: the Snakefile validates its config
 # through motifline.config before it builds the DAG. h5py is one because `motifline
 # smoke` reads the patterns it discovered back out of modisco.h5.
-dependencies = ["numpy", "pandas", "pyyaml", "h5py", "snakemake>=8"]
+# snakemake: the metadata and rerun triggers are tested on 9.25.
+dependencies = ["numpy", "pandas", "pyyaml", "h5py", "snakemake>=9.25,<10"]
 
 [project.optional-dependencies]
 dev = ["pytest", "scipy"]
@@ -30,9 +33,13 @@ motifline = "motifline.cli:main"
 
 [project.urls]
 Repository = "https://github.com/wangkant/motifline"
+Documentation = "https://github.com/wangkant/motifline/blob/main/docs/INSTALL.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.dynamic]
+version = { attr = "motifline.__version__" }
+
 [tool.setuptools.package-data]
-motifline = ["config_skeleton.yaml"]
+motifline = ["config_skeleton.yaml", "Snakefile", "envs/*.yaml", "envs/locks/*.txt"]

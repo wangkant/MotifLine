@@ -1,15 +1,15 @@
 import importlib.util
 import subprocess
 import sys
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+from conftest import STEPS
 
 from motifline.adopt import normalize_peaks
 
-STEP = Path(__file__).resolve().parents[1] / "src/motifline/steps/attr_ag.py"
+STEP = STEPS / "attr_ag.py"
 
 _spec = importlib.util.spec_from_file_location("attr_ag_step", STEP)
 attr_ag = importlib.util.module_from_spec(_spec)

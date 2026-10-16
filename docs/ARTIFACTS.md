@@ -7,9 +7,11 @@ finished only once its target has rerun cleanly.
 
 `run_info.json` is deleted when a stage starts and written only after it succeeds:
 `stage`, the exact `argv`, the `param_sig` the rule reruns on, the `env` prefix and the
-`tools` versions that env reports, `host`, `started`/`finished`, and `code`: the git
-commit of the motifline checkout (plus `chrombpnet_src` / `ag_src` for attribution
-stages), with a digest appended when a checkout has uncommitted changes.
+`tools` versions that env reports, `host`, `started`/`finished`, the `motifline`
+version, and `code`: for motifline (plus `chrombpnet_src` / `ag_src` for attribution
+stages) the git commit, with a digest appended when the checkout has uncommitted
+changes, or, for code that is not in git (an installed package), `commit: null` and a
+`sha256` of its `.py` files and Snakefile.
 
 Stages that produce or adopt an attribution (`attribute`, `attribute_sharded`,
 `merge_shards`, `import_attr`) record `checks` measured on the written array:

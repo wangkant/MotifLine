@@ -3,7 +3,9 @@ import subprocess, sys
 import pytest
 from pathlib import Path
 
-STEP = Path(__file__).resolve().parents[1] / "src/motifline/steps/attr_cbp.py"
+from conftest import STEPS
+
+STEP = STEPS / "attr_cbp.py"
 
 
 def _load_step():

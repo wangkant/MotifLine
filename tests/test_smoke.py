@@ -6,8 +6,9 @@ which needs modisco and finemo and so is not part of this suite.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
-from motifline.smoke import MOTIF, decode, synthetic
+from motifline.smoke import MOTIF, decode, run_smoke, synthetic
 
 
 def test_shapes_and_dtypes_match_what_a_stage_writes():
@@ -78,3 +79,12 @@ def test_decode_round_trips_an_arbitrary_one_hot_block():
     _, ohe, _, _ = synthetic(n=3, width=40, seed=1)
     assert len(decode(ohe[0])) == 40
     assert set(decode(ohe[0])) <= set("ACGT")
+
+
+def test_a_non_empty_workdir_is_refused_before_anything_is_written(tmp_path):
+    keep = tmp_path / "results.tsv"
+    keep.write_text("mine")
+    with pytest.raises(SystemExit, match="not empty"):
+        run_smoke(compute_env=str(tmp_path / "no_env"), workdir=str(tmp_path))
+    assert sorted(tmp_path.iterdir()) == [keep] and keep.read_text() == "mine"
+

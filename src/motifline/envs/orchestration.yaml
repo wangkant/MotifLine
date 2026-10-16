@@ -1,4 +1,5 @@
-# snakemake and the motifline package. Exact versions: envs/locks/orchestration.*
+# Python and snakemake as tested; install motifline into it. Exact versions:
+# envs/locks/orchestration.*
 name: motifline-orchestration
 channels: [conda-forge]
 dependencies:

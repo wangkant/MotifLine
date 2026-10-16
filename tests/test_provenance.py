@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import sys
 
 import pytest
 
-from motifline.provenance import record, tool_versions
+from motifline.provenance import code_entry, record, tool_versions
+from motifline.steps.digests import git_commit, tree_sha256
 
 posix = pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell, paths and env layout")
 
@@ -78,10 +81,72 @@ def test_record_embeds_the_versions_of_the_env_that_ran_the_stage(tmp_path):
     assert isinstance(info["tools"]["pytest"], str)
 
 
+has_git = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", "-C", str(cwd), "-c", "user.name=t", "-c", "user.email=t@t",
+                    *args], check=True, capture_output=True)
+
+
+@has_git
 def test_record_names_the_commit_of_the_model_code(tmp_path):
-    from pathlib import Path
-    repo = Path(__file__).resolve().parents[1]
-    record(tmp_path, stage="attribute", argv=["x"], code={"src": repo, "none": tmp_path})
-    code = json.loads((tmp_path / "run_info.json").read_text())["code"]
+    repo, out, plain = tmp_path / "repo", tmp_path / "out", tmp_path / "plain"
+    repo.mkdir()
+    plain.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "m.py").write_text("x = 1\n")
+    _git(repo, "add", "m.py")
+    _git(repo, "commit", "-qm", "m")
+    record(out, stage="attribute", argv=["x"], code={"src": repo, "none": plain})
+    code = json.loads((out / "run_info.json").read_text())["code"]
     assert code["src"]["commit"] and len(code["src"]["commit"]) >= 40
     assert code["none"]["commit"] is None
+    (repo / "m.py").write_text("x = 2\n")
+    record(out, stage="attribute", argv=["x"], code={"src": repo})
+    dirty = json.loads((out / "run_info.json").read_text())["code"]["src"]["commit"]
+    assert dirty.startswith(code["src"]["commit"] + "+")
+
+
+@has_git
+def test_an_untracked_directory_inside_another_repository_has_no_commit(tmp_path):
+    _git(tmp_path, "init", "-q")
+    (tmp_path / "a.py").write_text("x = 1\n")
+    _git(tmp_path, "add", "a.py")
+    _git(tmp_path, "commit", "-qm", "a")
+    pkg = tmp_path / "venv" / "motifline"
+    pkg.mkdir(parents=True)
+    (pkg / "b.py").write_text("y = 2\n")
+    assert git_commit(tmp_path) is not None
+    assert git_commit(pkg) is None
+    entry = code_entry(pkg)
+    assert entry["commit"] is None and entry["sha256"] == tree_sha256(pkg)
+
+
+def test_the_code_digest_follows_the_code_and_ignores_bytecode(tmp_path):
+    (tmp_path / "steps").mkdir()
+    (tmp_path / "steps" / "a.py").write_text("x = 1\n")
+    (tmp_path / "Snakefile").write_text("rule all:\n")
+    before = tree_sha256(tmp_path)
+    (tmp_path / "steps" / "__pycache__").mkdir()
+    (tmp_path / "steps" / "__pycache__" / "a.cpython-312.pyc").write_bytes(b"\0")
+    (tmp_path / "notes.txt").write_text("n")
+    assert tree_sha256(tmp_path) == before
+    (tmp_path / "steps" / "a.py").write_text("x = 2\n")
+    assert tree_sha256(tmp_path) != before
+
+
+@has_git
+def test_an_untracked_py_file_in_a_checkout_marks_it_changed(tmp_path):
+    _git(tmp_path, "init", "-q")
+    (tmp_path / "a.py").write_text("x = 1\n")
+    _git(tmp_path, "add", "a.py")
+    _git(tmp_path, "commit", "-qm", "a")
+    clean = git_commit(tmp_path)
+    (tmp_path / "notes.txt").write_text("not code")
+    assert git_commit(tmp_path) == clean
+    (tmp_path / "patch.py").write_text("y = 2\n")
+    first = git_commit(tmp_path)
+    assert first.startswith(clean + "+")
+    (tmp_path / "patch.py").write_text("y = 3\n")
+    assert git_commit(tmp_path) not in (clean, first)

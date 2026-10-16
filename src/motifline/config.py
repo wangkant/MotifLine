@@ -80,6 +80,12 @@ def problems(cfg: dict, *, paths: bool = True, base=".") -> list[str]:
     if not isinstance(runs, dict) or not runs:
         out.append("runs: no runs are declared")
         runs = {}
+    bad = [n for n in runs if not _run_name_ok(n)]
+    if bad:
+        # YAML reads off/no/yes/on as booleans and bare numbers as numbers
+        out.append(f"runs: names must be strings without '/', '=' or spaces that do not "
+                   f"start with '-', not {bad} (quote YAML booleans and numbers)")
+        runs = {k: v for k, v in runs.items() if k not in bad}
 
     out += _structure(cfg, runs)
     for name in sorted(runs):
@@ -88,6 +94,12 @@ def problems(cfg: dict, *, paths: bool = True, base=".") -> list[str]:
     if paths:
         out += _paths(cfg, runs, Path(base))
     return out
+
+
+def _run_name_ok(name) -> bool:
+    # a path component, and the label in name_patterns' `--h5 <run>=<path>`
+    return (isinstance(name, str) and bool(name) and not name.startswith("-")
+            and not any(c in name for c in "/=") and not any(c.isspace() for c in name))
 
 
 def _computed_models(runs: dict) -> set[str]:

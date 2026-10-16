@@ -1,5 +1,5 @@
-# conda packages in motifline, read from conda-meta on 2026-09-19.
-# Recreate with:  conda create -p <prefix> --file orchestration.conda.txt
+# conda packages in the orchestration env, read from conda-meta on 2026-09-19.
+# Recreate with:  conda create -p <prefix> -c conda-forge --file orchestration.conda.txt
 _openmp_mutex=4.5=20_gnu
 bzip2=1.0.8=hda65f42_10
 ca-certificates=2026.7.22=hbd8a1cb_0

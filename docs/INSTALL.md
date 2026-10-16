@@ -1,31 +1,46 @@
 # Installing motifline
 
-Three conda environments, two model source checkouts, reference files and a config.
-`motifline check` reports what is still missing; `motifline smoke` tests the
-downstream half without a model.
+The motifline package, two more conda environments, two model source checkouts,
+reference files and a config. `motifline check` reports what is still missing;
+`motifline smoke` tests the downstream half without a model.
 
 motifline only assembles command lines: each stage runs in its own environment, so
 the orchestration and compute environments can hold incompatible packages.
 
-## 1. The package
+## 1. The package and a project
 
 ```bash
-git clone https://github.com/wangkant/motifline.git
-cd motifline
+ENVS=$HOME/motifline-envs
+conda create -p $ENVS/orchestration python=3.12        # or any Python >= 3.11 env
+$ENVS/orchestration/bin/pip install "git+https://github.com/wangkant/motifline.git"
+conda activate $ENVS/orchestration
+mkdir my-analysis && cd my-analysis
+motifline init
 ```
+
+The environment motifline is installed in is the orchestration environment: it runs
+snakemake (installed with motifline) and the `motifline` command. For the exact
+versions motifline was tested with, install `envs/locks/orchestration.pip.txt` into it
+after `init`.
+
+The project directory is where motifline runs: `init` writes `config/default.yaml`
+and `envs/` there, and `run` writes `results/` and snakemake's `.snakemake/` there.
+Relative paths in the config are resolved against it. A config that sits in another
+project (next to its `.snakemake/`) is refused, so a run started from the wrong
+directory does not begin again from nothing. In a checkout of this repository the
+checkout root is the project, as before.
 
 ## 2. The environments
 
 `envs/*.yaml` pin the versions motifline is tested with; `envs/locks/` holds full
-package lists for reproducing results exactly. Build the prefixes outside the
-repository and point the config at them.
+package lists for reproducing results exactly. `motifline init` copies both from the
+package into the project and leaves existing env files alone (`--force` replaces
+them); it never replaces an existing config. Build the prefixes outside the project
+and point the config at them.
 
 ```bash
-ENVS=$HOME/motifline-envs
-conda env create -p $ENVS/orchestration -f envs/orchestration.yaml
-conda env create -p $ENVS/compute       -f envs/compute.yaml
-conda env create -p $ENVS/meme          -f envs/meme.yaml
-$ENVS/orchestration/bin/pip install -e .
+conda env create -p $ENVS/compute -f envs/compute.yaml
+conda env create -p $ENVS/meme    -f envs/meme.yaml
 ```
 
 | env | runs | needed for |
@@ -70,7 +85,7 @@ AlphaGenome run needs `weights` loadable by `AlphaGenome.from_pretrained`.
 Official TensorFlow ChromBPNet results are imported rather than computed: point an
 adopted run at the directory holding `<prefix>.counts_scores.h5` and
 `<prefix>.interpreted_regions.bed` from chrombpnet's interpret step, with
-`adopt_format: chrombpnet_h5` (see `config/example.yaml`). The import needs
+`adopt_format: chrombpnet_h5` (see `config/example.yaml` in the repository). The import needs
 `genome.fasta`, the same genome chrombpnet read.
 
 ## 4. Reference data
@@ -89,21 +104,22 @@ Peaks must be 10- or 11-column narrowPeak (11th column `True`) with the summit
 offset in column 10, no header lines, every chromosome in `chrom_sizes`, every summit inside its peak and no
 two peaks with the same summit. `motifline check` verifies all of this.
 
-`config/peaks/k562_allpeaks_33917.bed` is an example K562 peak set covering 15
-chromosomes. For your own data, point a run's `peaks:` at your narrowPeak.
+The repository's `config/peaks/k562_allpeaks_33917.bed` is an example K562 peak set
+covering 15 chromosomes; it is not part of the package. For your own data, point a
+run's `peaks:` at your narrowPeak.
 
 ## 5. The config
 
 ```bash
-motifline init
 $EDITOR config/default.yaml
 motifline check
 ```
 
-`config/example.yaml` has one computed CBP run, one AG run and one adopted run.
+The repository's `config/example.yaml` has a sharded and an AG computed run, an
+imported official ChromBPNet run and a cancelled adopted run.
 `motifline check` reports, in one pass: missing or misspelled keys (also inside
 `modisco:`, `finemo:` and the other sections), values of the wrong type, missing
-paths and invalid peak files. Relative paths resolve against the motifline checkout.
+paths and invalid peak files. Relative paths resolve against the project directory.
 
 ## 6. Does it work?
 
@@ -114,7 +130,8 @@ motifline smoke
 Plants AP-1 (`TGACTCA`) in 180 of 300 synthetic hypothetical attributions, runs
 MoDISco and FiNeMo, and checks that the motif is discovered and that the hits land
 on the planted positions. Needs no GPU (it uses one only if `CUDA_VISIBLE_DEVICES` is
-set), no genome and no weights. Attribution and naming are
+set), no genome and no weights. It works in a temporary directory, or in an empty
+`--workdir`, and deletes it after a pass. Attribution and naming are
 not covered.
 
 ## 7. Running
@@ -128,9 +145,11 @@ motifline run -j 8 -- --rerun-incomplete      # anything after -- goes to snakem
 
 A stage reruns when its declared inputs (for attribution: checkpoint, peaks, genome)
 or its parameters change, or when its rule body in the Snakefile changes. Edits to
-`src/motifline/steps/*.py` or to the model checkouts do not trigger reruns; after
-updating either, force the affected stages with `-R <rule>`. Each `run_info.json`
-records the motifline commit, and attribution stages also the model checkouts'.
+the step scripts (`motifline/steps/*.py`) or to the model checkouts do not trigger
+reruns, including when they arrive with a motifline upgrade; after either, force the
+affected stages with `-R <rule>`. Each `run_info.json` records the motifline version and the
+code it ran: the commit of a git checkout, or a digest of the installed package's
+code; attribution stages also record the model checkouts.
 
 Every GPU step uses the first visible device. `--gpus N` only limits how many GPU
 jobs run at once, so with N > 1 they share that device. Set `CUDA_VISIBLE_DEVICES`

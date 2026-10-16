@@ -1,7 +1,12 @@
-"""motifline init | check | run | smoke. `run` checks the config, then calls snakemake."""
+"""motifline init | check | run | smoke. `run` checks the config, then calls snakemake.
+
+The directory motifline runs in is the project: config/default.yaml, results/ and
+relative paths in the config are all taken from it. The Snakefile ships with the package.
+"""
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -11,20 +16,15 @@ from motifline.config import ConfigError, check as check_config, load, problems,
 from motifline.tools import TOOLS, deviations, live_defaults, render_deviations
 
 DEFAULT_CONFIG = "config/default.yaml"
+PACKAGE = Path(__file__).resolve().parent
+SNAKEFILE = PACKAGE / "Snakefile"
+ENVS = PACKAGE / "envs"
 
 
-def find_workflow(start=None) -> Path | None:
-    here = Path(start or Path.cwd()).resolve()
-    for d in [here, *here.parents]:
-        if (d / "Snakefile").is_file():
-            return d
-    return None
-
-
-def snakemake_argv(targets, *, snakefile, jobs=None, gpus=None, dry_run=False,
+def snakemake_argv(targets, *, snakefile, directory, jobs=None, gpus=None, dry_run=False,
                    configfile=None, extra=()) -> list[str]:
     argv = [sys.executable, "-m", "snakemake", "--snakefile", str(snakefile),
-            "--directory", str(Path(snakefile).parent)]
+            "--directory", str(directory)]
     if configfile:
         argv += ["--configfile", str(configfile)]
     if jobs is not None:
@@ -55,15 +55,50 @@ def deviation_lines(cfg) -> list[str]:
     return render_deviations(deviations(cfg, live))
 
 
+def copy_envs(dest: Path, force: bool) -> list[Path]:
+    """The env recipes and locks, so the project keeps the versions it was set up with."""
+    written = []
+    for src in sorted(ENVS.rglob("*")):
+        if src.is_dir() or "__pycache__" in src.parts:
+            continue
+        out = dest / src.relative_to(ENVS)
+        if out.exists() and not force:
+            continue
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, out)
+        written.append(out)
+    return written
+
+
 def cmd_init(args) -> int:
     out = Path(args.config)
-    if out.exists() and not args.force:
-        print(f"{out} already exists; pass --force to overwrite it", file=sys.stderr)
-        return 1
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(skeleton())
-    print(f"wrote {out}\nEdit the paths, then run: motifline check -c {out}")
+    if out.exists():
+        print(f"{out} exists; left as it is")
+    else:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(skeleton())
+        print(f"wrote {out}")
+    envs = Path("envs").resolve()
+    print(f"wrote {len(copy_envs(envs, args.force))} env file(s) to {envs}")
+    print(f"Build the envs, edit the paths, then run: motifline check -c {out}")
     return 0
+
+
+def owning_project(configfile) -> Path | None:
+    """The existing project a config sits in: <dir>/config/x.yaml next to <dir>/.snakemake."""
+    d = Path(configfile).resolve().parent
+    for p in (d, d.parent):
+        if (p / ".snakemake").is_dir():
+            return p
+    return None
+
+
+def other_project(configfile) -> str | None:
+    owner = owning_project(configfile)
+    if owner is None or owner == Path.cwd().resolve():
+        return None
+    return (f"{configfile} belongs to the project at {owner}, but motifline runs in "
+            f"{Path.cwd()}, where results/ would start from scratch; run from {owner}")
 
 
 def cmd_check(args) -> int:
@@ -72,9 +107,10 @@ def cmd_check(args) -> int:
     except ConfigError as e:
         print(str(e), file=sys.stderr)
         return 1
-    # the checkout holding the config is where it runs
-    base = find_workflow(Path(args.config).resolve().parent) or find_workflow() or Path.cwd()
-    found = problems(cfg, paths=not args.no_paths, base=base)
+    if msg := other_project(args.config):
+        print(msg, file=sys.stderr)
+        return 1
+    found = problems(cfg, paths=not args.no_paths, base=Path.cwd())
     if found:
         scope = "structure" if args.no_paths else "structure and paths"
         print(f"{len(found)} problem(s) in {args.config} ({scope}):", file=sys.stderr)
@@ -91,18 +127,17 @@ def cmd_check(args) -> int:
 
 
 def cmd_run(args) -> int:
-    workflow = find_workflow()
-    if workflow is None:
-        print("no Snakefile in this directory or any parent; run motifline from a "
-              "checkout of the pipeline", file=sys.stderr)
-        return 1
-    configfile = args.config or workflow / DEFAULT_CONFIG
+    project = Path.cwd()
+    configfile = args.config or DEFAULT_CONFIG
     if not Path(configfile).is_file():
-        print(f"{configfile} does not exist; start one with `motifline init`",
-              file=sys.stderr)
+        print(f"{configfile} does not exist; run motifline from the project directory, "
+              f"or start one there with `motifline init`", file=sys.stderr)
+        return 1
+    if msg := other_project(configfile):
+        print(msg, file=sys.stderr)
         return 1
     try:
-        check_config(load(configfile), paths=not args.no_check, base=workflow)
+        check_config(load(configfile), paths=not args.no_check, base=project)
     except ConfigError as e:
         print(str(e), file=sys.stderr)
         print("\nrefusing to build the DAG on a config that cannot run; "
@@ -110,7 +145,7 @@ def cmd_run(args) -> int:
         return 1
     for line in deviation_lines(load(configfile)):
         print(line, file=sys.stderr)
-    argv = snakemake_argv(args.targets, snakefile=workflow / "Snakefile",
+    argv = snakemake_argv(args.targets, snakefile=SNAKEFILE, directory=project,
                           jobs=args.jobs, gpus=args.gpus, dry_run=args.dry_run,
                           configfile=configfile, extra=args.extra)
     print(" ".join(argv), file=sys.stderr)
@@ -131,9 +166,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="print the version and exit")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    init = sub.add_parser("init", help="write a config skeleton to fill in")
+    init = sub.add_parser("init", help="write a config skeleton and the env recipes")
     init.add_argument("-c", "--config", default=DEFAULT_CONFIG)
-    init.add_argument("--force", action="store_true", help="overwrite an existing file")
+    init.add_argument("--force", action="store_true",
+                      help="replace existing env files (an existing config is never replaced)")
     init.set_defaults(fn=cmd_init)
 
     chk = sub.add_parser("check", help="report everything wrong with a config, at once")
@@ -158,7 +194,8 @@ def build_parser() -> argparse.ArgumentParser:
     smoke.add_argument("--compute-env", default=None,
                        help="env prefix holding modisco and finemo "
                             "(default: envs.compute from the config)")
-    smoke.add_argument("--workdir", default=None)
+    smoke.add_argument("--workdir", default=None,
+                       help="an empty or new directory for the smoke run (default: a temp dir)")
     smoke.add_argument("--keep", action="store_true", help="keep the working directory")
     smoke.set_defaults(fn=cmd_smoke)
     return p

@@ -1,4 +1,4 @@
-# pip packages in envs/motifline, frozen 2026-09-19.
+# pip packages in the orchestration env, frozen 2026-09-19.
 # The exact tree this pipeline's published runs were produced with.
 # Recreate with:  <prefix>/bin/pip install -r orchestration.pip.txt
 annotated-types==0.8.0

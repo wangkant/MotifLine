@@ -23,7 +23,7 @@ import os
 import sys
 
 from convergence import THRESHOLD, Deltas, summary
-from digests import file_sha256, git_commit
+from digests import file_sha256, git_commit, tree_sha256
 
 
 def parse_args():
@@ -187,7 +187,7 @@ def main():
     identity = {**{k: getattr(a, k) for k in CHUNK_ARGS},
                 "inputs_sha256": h.hexdigest(),
                 "weights_sha256": file_sha256(a.weights),
-                "ag_src_commit": git_commit(a.ag_src),
+                "ag_src_commit": git_commit(a.ag_src) or f"tree:{tree_sha256(a.ag_src)}",
                 "step_sha256": {f: file_sha256(os.path.join(here, f))
                                 for f in ("attr_ag.py", "ag_support.py")}}
     cdir = f"{a.out_dir}/_chunks{suffix}"

@@ -2,12 +2,12 @@
 import importlib.util
 import subprocess
 import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import STEPS
 
-STEP = Path(__file__).resolve().parents[1] / "src/motifline/steps/import_chrombpnet.py"
+STEP = STEPS / "import_chrombpnet.py"
 _spec = importlib.util.spec_from_file_location("import_chrombpnet_step", STEP)
 imp = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(imp)

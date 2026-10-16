@@ -2,14 +2,13 @@
 import importlib.util
 import subprocess
 import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import STEPS
 
 from motifline.merge_shards import merge_shards
 
-STEPS = Path(__file__).resolve().parents[1] / "src/motifline/steps"
 AG_ARGS = ["--ag_src", "a", "--weights", "w", "--track", "60", "--biosample", "K562"]
 
 

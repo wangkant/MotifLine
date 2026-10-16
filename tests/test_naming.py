@@ -1,14 +1,12 @@
 """Naming: the union MEME, TomTom's command line, gene symbols, the query trim."""
 import importlib.util
 import json
-from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import STEPS
 
 from motifline import naming as nm
-
-STEPS = Path(__file__).resolve().parents[1] / "src/motifline/steps"
 
 
 def _load(name):

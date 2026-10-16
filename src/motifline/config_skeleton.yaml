@@ -1,5 +1,5 @@
 # motifline config, written by `motifline init`. Check it with `motifline check`.
-# Paths are absolute or relative to the motifline checkout.
+# Paths are absolute or relative to the project directory (where motifline runs).
 
 envs:
   compute: /path/to/envs/compute      # built from envs/compute.yaml
@@ -38,5 +38,5 @@ reference_lexicon:
   # flags matches with q <= this as confident; nothing is dropped
   qval_threshold: 0.05
 
-# One entry per run; see config/example.yaml.
+# One entry per run; see config/example.yaml in the motifline repository.
 runs: {}

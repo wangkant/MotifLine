@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
 
 import yaml
 
-REPO = Path(__file__).resolve().parents[1]
+from motifline.cli import SNAKEFILE
 
 
 def _config(tmp_path):
@@ -47,8 +46,16 @@ def _dry_run(tmp_path, cfg):
     path.write_text(yaml.safe_dump(cfg))
     return subprocess.run(
         [sys.executable, "-m", "snakemake", "-n", "-q", "rules", "--snakefile",
-         str(REPO / "Snakefile"), "--directory", str(tmp_path), "--configfile", str(path)],
+         str(SNAKEFILE), "--directory", str(tmp_path), "--configfile", str(path)],
         capture_output=True, text=True)
+
+
+def test_a_dot_in_a_run_name_does_not_match_another_run(tmp_path):
+    cfg = _config(tmp_path)
+    cfg["runs"]["k.v2"] = cfg["runs"].pop("adopted")
+    cfg["runs"]["kxv2"] = cfg["runs"].pop("single")
+    r = _dry_run(tmp_path, cfg)
+    assert r.returncode == 0, r.stderr
 
 
 def test_every_run_kind_builds(tmp_path):
@@ -62,7 +69,7 @@ def test_every_run_kind_builds(tmp_path):
 
 def test_no_config_is_refused(tmp_path):
     r = subprocess.run([sys.executable, "-m", "snakemake", "-n", "--snakefile",
-                        str(REPO / "Snakefile"), "--directory", str(tmp_path)],
+                        str(SNAKEFILE), "--directory", str(tmp_path)],
                        capture_output=True, text=True)
     assert r.returncode != 0 and "no config" in (r.stdout + r.stderr)
 
@@ -96,7 +103,7 @@ def test_a_cancelled_run_is_rebuilt_from_its_frozen_attr_without_recomputing(tmp
     path.write_text(yaml.safe_dump(cfg))
     r = subprocess.run(
         [sys.executable, "-m", "snakemake", "-n", "-q", "rules", "--snakefile",
-         str(REPO / "Snakefile"), "--directory", str(tmp_path), "--configfile", str(path),
+         str(SNAKEFILE), "--directory", str(tmp_path), "--configfile", str(path),
          "--", "results/frozen/modisco/modisco.h5"], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     out = r.stdout + r.stderr
@@ -108,7 +115,7 @@ def test_a_cancelled_run_without_attr_is_an_error_when_targeted(tmp_path):
     path = tmp_path / "cfg.yaml"
     path.write_text(yaml.safe_dump(cfg))
     r = subprocess.run(
-        [sys.executable, "-m", "snakemake", "-n", "--snakefile", str(REPO / "Snakefile"),
+        [sys.executable, "-m", "snakemake", "-n", "--snakefile", str(SNAKEFILE),
          "--directory", str(tmp_path), "--configfile", str(path),
          "--", "results/frozen/modisco/modisco.h5"], capture_output=True, text=True)
     assert r.returncode != 0 and "attr" in (r.stdout + r.stderr)
@@ -122,7 +129,7 @@ def test_a_chrombpnet_h5_run_is_imported_by_the_compute_env_step(tmp_path):
     path = tmp_path / "cfg.yaml"
     path.write_text(yaml.safe_dump(cfg))
     r = subprocess.run(
-        [sys.executable, "-m", "snakemake", "-n", "-p", "--snakefile", str(REPO / "Snakefile"),
+        [sys.executable, "-m", "snakemake", "-n", "-p", "--snakefile", str(SNAKEFILE),
          "--directory", str(tmp_path), "--configfile", str(path),
          "--", "results/tf/attr/attr.npy"], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr

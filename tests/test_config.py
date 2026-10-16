@@ -310,3 +310,15 @@ def test_a_chrombpnet_h5_run_names_both_files_and_is_cbp():
 def test_an_unknown_adopt_format_is_reported():
     assert only(problems(cfg_cbp(runs={"tf": _h5_run(adopt_format="bigwig")}), paths=False),
                 "adopt_format")
+
+
+def test_run_names_that_are_not_plain_strings_are_refused():
+    c = cfg_cbp()
+    r1 = c["runs"]["r1"]
+    # what YAML makes of `off:` and `2024:`
+    bad = [False, 2024, "a/b", "w=2048", "-rep1", "k562 cbp", ""]
+    c["runs"] = {**{n: dict(r1) for n in bad}, "k562_cbp.v2-a": dict(r1)}
+    found = [p for p in problems(c, paths=False) if "names must be" in p]
+    assert len(found) == 1
+    assert all(repr(n) in found[0] for n in bad) and "k562_cbp.v2-a" not in found[0]
+

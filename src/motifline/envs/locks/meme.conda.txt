@@ -1,5 +1,5 @@
-# conda packages in meme, read from conda-meta on 2026-09-19.
-# Recreate with:  conda create -p <prefix> --file meme.conda.txt
+# conda packages in the meme env, read from conda-meta on 2026-09-19.
+# Recreate with:  conda create -p <prefix> -c conda-forge -c bioconda --file meme.conda.txt
 _openmp_mutex=4.5=20_gnu
 bzip2=1.0.8=hda65f42_9
 ca-certificates=2026.5.20=hbd8a1cb_0

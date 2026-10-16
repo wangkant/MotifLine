@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from motifline import __version__
-from motifline.steps.digests import git_commit
+from motifline.steps.digests import git_commit, tree_sha256
 
 PACKAGES = ("finemo", "modisco-lite", "tangermeme", "torch", "numpy")
 
@@ -47,6 +47,20 @@ def tool_versions(env_prefix: str, packages: tuple[str, ...] = PACKAGES) -> dict
         return {"unavailable": f"{type(e).__name__}: {e}"}
 
 
+def code_entry(path) -> dict:
+    """The commit of a checkout; outside git (an installed package), a digest of its code."""
+    commit = git_commit(path)
+    entry = {"path": str(path), "commit": commit}
+    if commit is None and Path(path).is_dir():
+        entry["sha256"] = tree_sha256(path)
+    return entry
+
+
+def code_entries(code: dict) -> dict:
+    """Entries already taken (a dict) are kept as they are."""
+    return {k: v if isinstance(v, dict) else code_entry(v) for k, v in code.items()}
+
+
 def record(out_dir, *, stage: str, argv, param_sig: str | None = None,
            started: str | None = None, env_prefix: str | None = None,
            packages: tuple[str, ...] = PACKAGES, checks: dict | None = None,
@@ -63,8 +77,7 @@ def record(out_dir, *, stage: str, argv, param_sig: str | None = None,
         "param_sig": param_sig,
         "env": env_prefix,
         "tools": tool_versions(env_prefix, tuple(packages)) if env_prefix else None,
-        "code": {k: {"path": str(v), "commit": git_commit(v)} for k, v in code.items()}
-                if code else None,
+        "code": code_entries(code) if code else None,
         "checks": checks,
         "host": platform.node(),
         "orchestrator_python": sys.version.split()[0],

@@ -11,5 +11,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev]" tables pyfaidx
+      - run: pip install build
+      - run: python -m build
+      # the tests run against the installed wheel, not src/
+      - run: pip install "$(ls dist/*.whl)[dev]" tables pyfaidx
+      - run: python -c "import motifline; assert 'site-packages' in motifline.__file__, motifline.__file__"
       - run: pytest -q

@@ -1,6 +1,7 @@
-# pip packages in envs/chrombpnet_local, frozen 2026-09-19.
+# pip packages in the compute env, frozen 2026-09-19.
 # The exact tree this pipeline's published runs were produced with.
-# Recreate with:  <prefix>/bin/pip install -r compute.pip.txt
+# Recreate with:  <prefix>/bin/pip install \
+#     --extra-index-url https://download.pytorch.org/whl/cu121 -r compute.pip.txt
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.5
 aiosignal==1.4.0

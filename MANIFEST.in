@@ -1,0 +1,3 @@
+include CITATION.cff
+include config/example.yaml
+include tests/conftest.py

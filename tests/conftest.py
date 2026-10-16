@@ -10,10 +10,15 @@ from pathlib import Path
 import pytest
 import yaml
 
+import motifline
+
 REPO = Path(__file__).resolve().parents[1]
+# the installed package, so CI exercises what a wheel ships
+PACKAGE = Path(motifline.__file__).resolve().parent
+STEPS = PACKAGE / "steps"
 
 # steps import their sibling modules, as they do when run as scripts
-sys.path.insert(0, str(REPO / "src/motifline/steps"))
+sys.path.insert(0, str(STEPS))
 
 
 def _from_config(*keys):

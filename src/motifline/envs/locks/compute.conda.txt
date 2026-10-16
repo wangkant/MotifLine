@@ -1,5 +1,5 @@
-# conda packages in chrombpnet_local, read from conda-meta on 2026-09-19.
-# Recreate with:  conda create -p <prefix> --file compute.conda.txt
+# conda packages in the compute env, read from conda-meta on 2026-09-19.
+# Recreate with:  conda create -p <prefix> -c conda-forge --file compute.conda.txt
 _openmp_mutex=4.5=20_gnu
 bzip2=1.0.8=hda65f42_9
 ca-certificates=2026.4.22=hbd8a1cb_0

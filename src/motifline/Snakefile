@@ -3,6 +3,7 @@
 #                                  \-> modisco_report
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -22,7 +23,7 @@ check_config(config, paths=False)
 
 ENV = config["envs"]["compute"]
 PY = f"{ENV}/bin/python"
-STEPS = Path(workflow.basedir) / "src/motifline/steps"
+STEPS = Path(workflow.basedir) / "steps"
 
 
 def rundef(w):
@@ -149,7 +150,8 @@ SINGLE = sorted(k for k in COMPUTED if not config["runs"][k].get("n_shards"))
 
 
 def _alt(names):
-    return "|".join(names) if names else "$^"
+    # escaped: a "." in one run name must not let it match another
+    return "|".join(map(re.escape, names)) if names else "$^"
 
 
 def shard_dirs(run):

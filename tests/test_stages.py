@@ -106,3 +106,20 @@ def test_a_failed_rerun_removes_the_old_label(tmp_path):
 def test_the_body_output_is_kept_in_stage_log(tmp_path):
     run_body(tmp_path, ["sh", "-c", "echo out; echo err >&2"], stage="discover")
     assert (tmp_path / "stage.log").read_text().split() == ["out", "err"]
+
+
+@pytest.mark.skipif(__import__("shutil").which("git") is None, reason="needs git")
+def test_the_code_is_identified_as_it_was_when_the_body_started(tmp_path):
+    repo, out = tmp_path / "repo", tmp_path / "out"
+    repo.mkdir()
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    (repo / "m.py").write_text("x = 1\n")
+    subprocess.run([*git, "add", "m.py"], check=True)
+    subprocess.run([*git, "commit", "-qm", "m"], check=True)
+    head = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True,
+                          text=True).stdout.strip()
+    edit = f"open({str(repo / 'm.py')!r}, 'w').write('x = 2\\n')"
+    run_body(out, [sys.executable, "-c", edit], stage="t", code={"src": repo})
+    info = json.loads((out / "run_info.json").read_text())
+    assert info["code"]["src"]["commit"] == head

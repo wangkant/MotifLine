@@ -84,14 +84,20 @@ def _run(argv, cwd) -> None:
 
 def _compute_env(explicit: str | None) -> Path:
     if explicit:
-        return Path(explicit).resolve()
-    from motifline.cli import DEFAULT_CONFIG, find_workflow
-    from motifline.config import load
-    workflow = find_workflow()
-    if workflow and (workflow / DEFAULT_CONFIG).is_file():
-        env = Path(load(workflow / DEFAULT_CONFIG)["envs"]["compute"]).expanduser()
-        return env if env.is_absolute() else (workflow / env).resolve()
-    raise SystemExit("no --compute-env given and no config/default.yaml to read it from")
+        env = Path(explicit).resolve()
+    else:
+        from motifline.cli import DEFAULT_CONFIG
+        from motifline.config import load
+        if not Path(DEFAULT_CONFIG).is_file():
+            raise SystemExit("no --compute-env given and no config/default.yaml here to read "
+                             "it from")
+        env = Path(load(DEFAULT_CONFIG)["envs"]["compute"]).resolve()
+    for tool in ("modisco", "finemo"):
+        if not os.access(env / "bin" / tool, os.X_OK):
+            raise SystemExit(f"{env / 'bin' / tool} is not an executable; envs.compute must be "
+                             f"the compute env's prefix (absolute, or relative to here; ~ is "
+                             f"not expanded)")
+    return env
 
 
 def discovered_patterns(h5_path) -> dict[str, str]:
@@ -130,8 +136,13 @@ def hit_agreement(hits_tsv, motif_names, planted, width) -> dict:
 
 def run_smoke(compute_env=None, workdir=None, keep: bool = False,
               n: int = 300, width: int = 500) -> int:
+    if workdir:
+        tmp = Path(workdir).resolve()
+        if tmp.exists() and any(tmp.iterdir()):
+            raise SystemExit(f"--workdir {tmp} is not empty; smoke deletes what it writes there")
     env = _compute_env(compute_env)
-    tmp = Path(workdir).resolve() if workdir else Path(tempfile.mkdtemp(prefix="motifline_smoke_"))
+    if not workdir:
+        tmp = Path(tempfile.mkdtemp(prefix="motifline_smoke_"))
     attr_dir = tmp / "attr"
     attr_dir.mkdir(parents=True, exist_ok=True)
     print(f"smoke: {tmp}\nsmoke: compute env {env}")

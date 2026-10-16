@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from motifline.provenance import PACKAGES, RUN_INFO, now, record
+from motifline.provenance import PACKAGES, RUN_INFO, code_entries, now, record
 
 STAGE_LOG = "stage.log"
 
@@ -24,6 +24,8 @@ def run_body(out_dir, argv, *, stage: str, param_sig: str | None = None,
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / RUN_INFO).unlink(missing_ok=True)
     started = now()
+    # the code as it is when the body starts, not after a pull during a long stage
+    code = code_entries(code) if code else None
     cmd = [str(a) for a in argv]
     term = getattr(sys.stdout, "buffer", None)
     with open(out_dir / STAGE_LOG, "wb") as log, subprocess.Popen(

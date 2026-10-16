@@ -8,8 +8,8 @@ sequence attributions, discovers recurring motifs, identifies their occurrences,
 and assigns reference-based annotations. A single configuration file connects
 these stages, with a shared downstream workflow for both supported models.
 
-[Installation](docs/INSTALL.md) · [Example configuration](config/example.yaml) ·
-[Output reference](docs/ARTIFACTS.md)
+[Installation](https://github.com/wangkant/motifline/blob/main/docs/INSTALL.md) · [Example configuration](https://github.com/wangkant/motifline/blob/main/config/example.yaml) ·
+[Output reference](https://github.com/wangkant/motifline/blob/main/docs/ARTIFACTS.md)
 
 ## What it does
 
@@ -29,7 +29,7 @@ motifline integrates established methods; it does not introduce a new motif
 analysis algorithm. Its contribution is a consistent, configurable workflow from
 attribution to annotated motif hits. ChromBPNet and AlphaGenome share every stage
 after `attr/`, making the downstream analysis consistent across models. Model
-windows and retained regions can still differ; see the [output reference](docs/ARTIFACTS.md).
+windows and retained regions can still differ; see the [output reference](https://github.com/wangkant/motifline/blob/main/docs/ARTIFACTS.md).
 
 ## Workflow
 
@@ -69,21 +69,24 @@ matches each pattern against it, and the best match gives the name.
 
 ## Installation
 
-Setup uses three conda environments, model source checkouts, model weights, and
-reference data. Follow the [installation guide](docs/INSTALL.md) for the complete
+motifline is a Python package; the workflow, the steps and the environment recipes
+ship inside it. The analysis itself needs two more conda environments, model source
+checkouts, model weights and reference data. Follow the [installation guide](https://github.com/wangkant/motifline/blob/main/docs/INSTALL.md) for the complete
 setup, including CUDA requirements and reference file formats.
 
 ```bash
-git clone https://github.com/wangkant/motifline.git
-cd motifline
+python -m pip install "git+https://github.com/wangkant/motifline.git"   # Python >= 3.11
+
+mkdir my-analysis && cd my-analysis
+motifline init                 # config/default.yaml, plus envs/ with recipes and locks
 
 ENVS=$HOME/motifline-envs
-conda env create -p "$ENVS/orchestration" -f envs/orchestration.yaml
-conda env create -p "$ENVS/compute"       -f envs/compute.yaml
-conda env create -p "$ENVS/meme"          -f envs/meme.yaml
-"$ENVS/orchestration/bin/pip" install -e .
-conda activate "$ENVS/orchestration"
+conda env create -p "$ENVS/compute" -f envs/compute.yaml
+conda env create -p "$ENVS/meme"    -f envs/meme.yaml
 ```
+
+The environment motifline is installed in runs snakemake; the steps run in
+`compute` and TomTom in `meme`, whose prefixes go in the config.
 
 **AlphaGenome requires the `deeplift-support` branch of Ruchir Rastogi's
 `alphagenome-pytorch` fork.** The attribution rules used here are not included in
@@ -99,10 +102,10 @@ includes an example K562 peak set.
 ## Quick start
 
 After completing the installation and reference setup, run these commands from
-the repository directory with the orchestration environment active:
+the project directory. It holds `config/default.yaml` and `results/`, and relative
+paths in the config are resolved against it.
 
 ```bash
-motifline init                 # create config/default.yaml
 $EDITOR config/default.yaml    # set paths, model weights, and runs
 motifline check                # validate configuration and input paths
 motifline smoke                # check motif discovery and hit calling on CPU
@@ -121,7 +124,7 @@ motifline run results/<run>/hits/hits.tsv -j 4
 ### Configure runs
 
 Each entry under `runs:` defines one analysis. The
-[example configuration](config/example.yaml) includes computed, sharded, adopted,
+[example configuration](https://github.com/wangkant/motifline/blob/main/config/example.yaml) includes computed, sharded, adopted,
 and cancelled runs, along with shared parameters and reference settings.
 
 | Setting | Behavior |
@@ -150,7 +153,8 @@ model attribution or naming.
 
 ## Outputs
 
-Results are organized by run under `results/<run>/`. Key files include:
+Results are organized by run under `results/<run>/` in the project directory. Key
+files include:
 
 | File | Contents |
 |---|---|
@@ -167,26 +171,27 @@ Results are organized by run under `results/<run>/`. Key files include:
 Use `regions.bed` as the row key for downstream analysis: peaks whose window runs
 off the chromosome or contains a non-ACGT base are dropped, so rows can differ from
 the peak file and between models.
-See [docs/ARTIFACTS.md](docs/ARTIFACTS.md) for stage directories, array shapes,
+See [docs/ARTIFACTS.md](https://github.com/wangkant/motifline/blob/main/docs/ARTIFACTS.md) for stage directories, array shapes,
 checkpoint behavior, and model-specific details.
 
 ## Repository layout
 
 ```text
-Snakefile             Snakemake workflow
-config/default.yaml   Local configuration generated by motifline init (not tracked)
-config/example.yaml   Example runs and shared settings
-config/peaks/         Example K562 peak set
-envs/                 Environment recipes and exact package locks
-src/motifline/        CLI, validation, attribution, naming, and orchestration
-src/motifline/steps/  Scripts executed in the compute environment
-docs/                 Installation and output documentation
-tests/                Tests runnable without a GPU
+src/motifline/            CLI, validation, attribution, naming, and orchestration
+src/motifline/Snakefile   Snakemake workflow
+src/motifline/steps/      Scripts executed in the compute environment
+src/motifline/envs/       Environment recipes and exact package locks
+config/example.yaml       Example runs and shared settings
+config/peaks/             Example K562 peak set
+docs/                     Installation and output documentation
+tests/                    Tests runnable without a GPU
 ```
+
+To work on motifline itself: `pip install -e ".[dev]"` in a checkout, then `pytest`.
 
 ## Citation and attribution
 
-If you use motifline, cite the pipeline using [CITATION.cff](CITATION.cff) and
+If you use motifline, cite the pipeline using [CITATION.cff](https://github.com/wangkant/motifline/blob/main/CITATION.cff) and
 the underlying tools and methods relevant to your analysis.
 
 | tool | version here | where |
@@ -215,4 +220,4 @@ Mölder et al. (2021), *F1000Research* 10:33, doi:10.12688/f1000research.29032.2
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/wangkant/motifline/blob/main/LICENSE).
