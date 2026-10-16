@@ -35,6 +35,9 @@ def attr_cmd(w):
     if r["model"] == "ag":
         return (f"{PY} {S}/attr_ag.py --ag_src {r['ag_src']} --weights {r['weights']} "
                 f"--track {r['track']} {common}")
+    if r.get("backend") == "tf":
+        return (f"TF_FORCE_GPU_ALLOW_GROWTH=true {config['envs']['chrombpnet']}/bin/python "
+                f"{S}/attr_cbp_tf.py --model_h5 {r['wo_bias']} {common}")
     return (f"{PY} {S}/attr_cbp.py "
             f"--wo_bias {r['wo_bias']} {common}")
 
