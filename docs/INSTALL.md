@@ -1,7 +1,7 @@
 # Installing motifline
 
-The motifline package, two more conda environments, two model source checkouts,
-reference files and a config. `motifline check` reports what is still missing;
+The motifline package, three more conda environments, the model source checkouts
+your runs need, reference files and a config. `motifline check` reports what is still missing;
 `motifline smoke` tests the downstream half without a model.
 
 motifline only assembles command lines: each stage runs in its own environment, so
@@ -39,29 +39,42 @@ them); it never replaces an existing config. Build the prefixes outside the proj
 and point the config at them.
 
 ```bash
-conda env create -p $ENVS/compute -f envs/compute.yaml
-conda env create -p $ENVS/meme    -f envs/meme.yaml
+conda env create -p $ENVS/compute    -f envs/compute.yaml
+conda env create -p $ENVS/chrombpnet -f envs/chrombpnet.yaml
+conda env create -p $ENVS/meme       -f envs/meme.yaml
 ```
 
-| env | runs | needed for |
-|---|---|---|
-| orchestration | snakemake, `motifline` | always |
-| compute | attribution steps, MoDISco, FiNeMo | always |
-| meme | `tomtom` | naming patterns |
+| env | config key | runs | needed for |
+|---|---|---|---|
+| orchestration | — | snakemake, `motifline` | always |
+| compute | `envs.compute` | MoDISco, FiNeMo, AlphaGenome and PyTorch-port attribution | always |
+| chrombpnet | `envs.chrombpnet` | official ChromBPNet attribution (TensorFlow) | computed ChromBPNet runs |
+| meme | `reference_lexicon.tomtom` | `tomtom` | naming patterns |
+
+`envs/chrombpnet.yaml` installs chrombpnet 1.0.1 from PyPI, which pins TensorFlow
+2.8.0, kundajelab-shap, deeplift and deepdish, with CUDA 11.2 and cuDNN 8.1 from
+conda-forge. The step sets `TF_FORCE_GPU_ALLOW_GROWTH`, so TensorFlow takes only the
+memory it needs instead of the whole card. It runs chrombpnet's own interpret code
+with one change: the official code draws its dinucleotide-shuffled references
+unseeded, and motifline seeds shuffle k with `random_state + k`, as tangermeme does on
+the other paths. GPU arithmetic can still change the last float16 digit of a score
+between runs.
 
 `envs/compute.yaml` pins `torch==2.3.1+cu121`; for another CUDA build change that
 line and the index URL. The DeepLIFT/SHAP references are seeded, but a different
 torch build can change the last digits of an attribution, so record the version
 with any attributions you keep (`run_info.json` does).
 
-Importing `chrombpnet.interpret` downloads a motif file and genome chrom sizes
-through `pooch`. On a GPU node without network access, run the import once on a
+With `backend: pytorch`, importing the port's `chrombpnet.interpret` downloads a motif
+file and genome chrom sizes through `pooch`. On a GPU node without network access, run the import once on a
 connected node so the files are in pooch's cache.
 
 ## 3. The model code
 
-Neither model is installed as a package. The attribution steps put the checkouts on
-`sys.path`; the config points at them.
+The official ChromBPNet is a package in its env. The ChromBPNet PyTorch port and
+AlphaGenome are not: the attribution steps put their checkouts on `sys.path`, and the
+config points at them. `chrombpnet_src` is needed for `backend: pytorch` runs and for
+AlphaGenome runs, which read chrom sizes with its code.
 
 ```bash
 git clone https://github.com/jsxlei/chrombpnet-pytorch.git          # chrombpnet_src
@@ -79,14 +92,22 @@ index into the ATAC head) and the `biosample` of that track; the step looks the 
 up in `alphagenome_pytorch/data/track_metadata_human.parquet` and refuses a mismatch
 (K562 is track 60).
 
-Model weights: a ChromBPNet run needs a bias-corrected PyTorch state dict for
-`BPNet(512 filters, 8 layers)` (`wo_bias`); Keras `.h5` models are not read. An
-AlphaGenome run needs `weights` loadable by `AlphaGenome.from_pretrained`.
-Official TensorFlow ChromBPNet results are imported rather than computed: point an
+Model weights: a ChromBPNet run needs, as `wo_bias`, the Keras model chrombpnet trains
+without the bias (`chrombpnet_nobias.h5`). With `backend: pytorch` it needs instead a
+bias-corrected PyTorch state dict for `BPNet(512 filters, 8 layers)`. An AlphaGenome
+run needs `weights` loadable by `AlphaGenome.from_pretrained`.
+
+Official ChromBPNet scores computed elsewhere can be imported instead: point an
 adopted run at the directory holding `<prefix>.counts_scores.h5` and
 `<prefix>.interpreted_regions.bed` from chrombpnet's interpret step, with
 `adopt_format: chrombpnet_h5` (see `config/example.yaml` in the repository). The import needs
-`genome.fasta`, the same genome chrombpnet read.
+`genome.fasta`, the same genome chrombpnet read. An interpret run done in shards is
+stacked into one prefix first, in envs.compute:
+
+```bash
+motifline merge-h5 --shard-prefix run/shard_0/k562 --shard-prefix run/shard_1/k562 \
+    --out-prefix merged/k562 --check-bed peaks.bed
+```
 
 ## 4. Reference data
 
@@ -115,8 +136,9 @@ $EDITOR config/default.yaml
 motifline check
 ```
 
-The repository's `config/example.yaml` has a sharded and an AG computed run, an
-imported official ChromBPNet run and a cancelled adopted run.
+The repository's `config/example.yaml` has a sharded official ChromBPNet run, a
+PyTorch-port run, an AG run, an imported official ChromBPNet run and a cancelled
+adopted run.
 `motifline check` reports, in one pass: missing or misspelled keys (also inside
 `modisco:`, `finemo:` and the other sections), values of the wrong type, missing
 paths and invalid peak files. Relative paths resolve against the project directory.
@@ -149,7 +171,8 @@ the step scripts (`motifline/steps/*.py`) or to the model checkouts do not trigg
 reruns, including when they arrive with a motifline upgrade; after either, force the
 affected stages with `-R <rule>`. Each `run_info.json` records the motifline version and the
 code it ran: the commit of a git checkout, or a digest of the installed package's
-code; attribution stages also record the model checkouts.
+code; attribution stages also record the model checkouts, and the official ChromBPNet
+stage the chrombpnet, tensorflow, kundajelab-shap and deeplift versions of its env.
 
 Every GPU step uses the first visible device. `--gpus N` only limits how many GPU
 jobs run at once, so with N > 1 they share that device. Set `CUDA_VISIBLE_DEVICES`
@@ -162,6 +185,9 @@ conda create -p $ENVS/compute --file envs/locks/compute.conda.txt
 $ENVS/compute/bin/pip install --extra-index-url https://download.pytorch.org/whl/cu121 \
     -r envs/locks/compute.pip.txt
 $ENVS/compute/bin/pip install pyarrow==17.0.0
+
+conda create -p $ENVS/chrombpnet -c conda-forge -c bioconda --file envs/locks/chrombpnet.conda.txt
+$ENVS/chrombpnet/bin/pip install -r envs/locks/chrombpnet.pip.txt
 ```
 
 The locks predate the AlphaGenome track check, which needs `pyarrow`.

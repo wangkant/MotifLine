@@ -13,7 +13,8 @@ from snakemake.exceptions import WorkflowError
 from motifline import naming as nm
 from motifline.attribution import hyp_check
 from motifline.config import attr_inputs as attr_input_paths, missing_attr_inputs
-from motifline.config import check as check_config
+from motifline.config import check as check_config, tf_cbp
+from motifline.provenance import CBP_PACKAGES, PACKAGES
 from motifline.runs import active_runs, cancelled_runs
 from motifline.stages import run_body as _run_body
 
@@ -23,6 +24,8 @@ check_config(config, paths=False)
 
 ENV = config["envs"]["compute"]
 PY = f"{ENV}/bin/python"
+# the official ChromBPNet (TensorFlow): cbp runs with backend tf, the default
+CBP_ENV = config["envs"].get("chrombpnet")
 STEPS = Path(workflow.basedir) / "steps"
 
 
@@ -55,10 +58,12 @@ def sig_naming(w=None):
                      qval_threshold=lex["qval_threshold"])
 
 
-def run_body(out_dir, argv, stage, env=None, prefix=None, sig=None, checks=(), code=None):
+def run_body(out_dir, argv, stage, env=None, prefix=None, sig=None, checks=(), code=None,
+             packages=PACKAGES):
     code = {"motifline": workflow.basedir, **(code or {})}
     return _run_body(out_dir, argv, stage=stage, param_sig=sig, env=env,
-                     env_prefix=ENV if prefix is None else prefix, checks=checks, code=code)
+                     env_prefix=ENV if prefix is None else prefix, packages=packages,
+                     checks=checks, code=code)
 
 
 def thread_env(n):
@@ -87,6 +92,8 @@ def attr_inputs(w):
 
 
 def attr_code(r):
+    if tf_cbp(r):
+        return {}  # chrombpnet is an installed package; the env's tools record its version
     code = {"chrombpnet_src": config["chrombpnet_src"]}
     if r["model"] == "ag":
         code["ag_src"] = r["ag_src"]
@@ -111,6 +118,13 @@ def attr_argv(r, out, shard_i=None):
         for k in ("in_window", "crop"):
             if k in r:
                 argv += [f"--{k}", str(r[k])]
+    elif tf_cbp(r):
+        argv = [f"{CBP_ENV}/bin/python", str(STEPS / "attr_cbp_tf.py"),
+                "--model_h5", r["wo_bias"], "--peaks", r["peaks"],
+                "--fasta", config["genome"]["fasta"], "--out_dir", out, "--hypothetical",
+                "--n_shuffles", n_shuffles, "--random_state", random_state]
+        if "in_window" in r:
+            argv += ["--in_window", str(r["in_window"])]
     elif r["model"] == "cbp":
         argv = [PY, str(STEPS / "attr_cbp.py"), "--chrombpnet_src", config["chrombpnet_src"],
                 "--wo_bias", r["wo_bias"], "--peaks", r["peaks"],
@@ -132,6 +146,19 @@ def attr_argv(r, out, shard_i=None):
 def sig_attr(w, shard_i=None):
     # interpreter and script paths left out: moving the checkout or env is not a new result
     return param_sig(argv=attr_argv(rundef(w), "<out>", shard_i=shard_i)[2:])
+
+
+def attr_stage(r, out, stage, sig, checks, shard_i=None):
+    """One attribution job: the official ChromBPNet in its own env, the rest in envs.compute."""
+    env = thread_env(ATTR_THREADS)
+    if tf_cbp(r):
+        # TensorFlow otherwise reserves the whole card
+        env["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+        prefix, packages = CBP_ENV, CBP_PACKAGES
+    else:
+        prefix, packages = ENV, PACKAGES
+    run_body(out, attr_argv(r, out, shard_i=shard_i), stage, env=env, prefix=prefix,
+             packages=packages, sig=sig, checks=checks, code=attr_code(r))
 
 
 ORCH_PY = sys.executable
@@ -210,10 +237,8 @@ rule attribute:
     resources: gpu=1
     params: sig=sig_attr
     run:
-        r = rundef(wildcards)
-        out = f"results/{wildcards.run}/attr"
-        run_body(out, attr_argv(r, out), "attribute", env=thread_env(ATTR_THREADS),
-                 sig=params.sig, checks=(hyp_check(),), code=attr_code(r))
+        attr_stage(rundef(wildcards), f"results/{wildcards.run}/attr", "attribute",
+                   params.sig, (hyp_check(),))
 
 rule attribute_sharded:
     input: attr_inputs
@@ -224,12 +249,9 @@ rule attribute_sharded:
     resources: gpu=1
     params: sig=lambda w: sig_attr(w, shard_i=int(w.i))
     run:
-        r = rundef(wildcards)
         i = int(wildcards.i)
-        out = f"results/{wildcards.run}/attr_shards/shard_{i}"
-        run_body(out, attr_argv(r, out, shard_i=i), "attribute_sharded",
-                 env=thread_env(ATTR_THREADS), sig=params.sig,
-                 checks=(hyp_check(f"attr_{i}.npy"),), code=attr_code(r))
+        attr_stage(rundef(wildcards), f"results/{wildcards.run}/attr_shards/shard_{i}",
+                   "attribute_sharded", params.sig, (hyp_check(f"attr_{i}.npy"),), shard_i=i)
 
 rule merge_shards:
     input: shard_outputs

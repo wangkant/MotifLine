@@ -2,8 +2,10 @@
 # Paths are absolute or relative to the project directory (where motifline runs).
 
 envs:
-  compute: /path/to/envs/compute      # built from envs/compute.yaml
+  compute: /path/to/envs/compute        # built from envs/compute.yaml
+  chrombpnet: /path/to/envs/chrombpnet  # built from envs/chrombpnet.yaml; official ChromBPNet
 
+# Read by the ChromBPNet PyTorch port (backend: pytorch) and by AlphaGenome runs
 chrombpnet_src: /path/to/chrombpnet-pytorch
 
 genome:

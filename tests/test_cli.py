@@ -50,8 +50,8 @@ def test_init_never_replaces_an_existing_config_but_still_adds_the_envs(tmp_path
 def test_init_copies_the_env_recipes_into_the_project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert main(["init"]) == 0
-    for name in ("compute.yaml", "meme.yaml", "orchestration.yaml",
-                 "locks/compute.pip.txt"):
+    for name in ("compute.yaml", "chrombpnet.yaml", "meme.yaml", "orchestration.yaml",
+                 "locks/compute.pip.txt", "locks/chrombpnet.pip.txt"):
         assert (tmp_path / "envs" / name).read_bytes() == (ENVS / name).read_bytes()
 
 
@@ -131,7 +131,10 @@ def test_configfile_is_forwarded_when_given(tmp_path):
 def test_the_package_ships_the_snakefile_and_the_env_recipes():
     assert "rule all:" in SNAKEFILE.read_text()
     assert (SNAKEFILE.parent / "steps" / "attr_cbp.py").is_file()
+    assert (SNAKEFILE.parent / "steps" / "attr_cbp_tf.py").is_file()
     assert (ENVS / "compute.yaml").is_file() and (ENVS / "locks" / "compute.pip.txt").is_file()
+    assert (ENVS / "chrombpnet.yaml").is_file()
+    assert (ENVS / "locks" / "chrombpnet.pip.txt").is_file()
 
 
 def test_run_without_a_config_here_points_at_init(tmp_path, capsys, monkeypatch):
@@ -253,3 +256,23 @@ def test_check_resolves_relative_paths_against_the_directory_it_runs_in(tmp_path
     monkeypatch.chdir(project)
     main(["check", "-c", str(path)])
     assert "runs.r1.peaks" not in capsys.readouterr().err
+
+
+# --- merge-h5 ----------------------------------------------------------------
+
+def test_merge_h5_without_a_usable_env_says_so(tmp_path, capsys):
+    rc = main(["merge-h5", "--shard-prefix", "a", "--out-prefix", "o",
+               "--compute-env", str(tmp_path / "no_env")])
+    assert rc == 1 and "not an executable interpreter" in capsys.readouterr().err
+
+
+def test_merge_h5_runs_the_step_in_the_given_env(tmp_path):
+    pytest.importorskip("tables")
+    from test_merge_chrombpnet_h5 import write_shard
+    write_shard(tmp_path / "s0", rows=3, first=0)
+    write_shard(tmp_path / "s1", rows=2, first=3)
+    rc = main(["merge-h5", "--shard-prefix", str(tmp_path / "s0"),
+               "--shard-prefix", str(tmp_path / "s1"), "--out-prefix", str(tmp_path / "all"),
+               "--compute-env", sys.prefix])
+    assert rc == 0
+    assert len((tmp_path / "all.interpreted_regions.bed").read_text().splitlines()) == 5

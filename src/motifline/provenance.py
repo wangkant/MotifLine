@@ -14,6 +14,8 @@ from motifline import __version__
 from motifline.steps.digests import git_commit, tree_sha256
 
 PACKAGES = ("finemo", "modisco-lite", "tangermeme", "torch", "numpy")
+# the env the official ChromBPNet attribution runs in
+CBP_PACKAGES = ("chrombpnet", "tensorflow", "kundajelab-shap", "deeplift", "numpy")
 
 RUN_INFO = "run_info.json"
 

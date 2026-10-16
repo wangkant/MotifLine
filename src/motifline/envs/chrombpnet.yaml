@@ -1,0 +1,13 @@
+# The official ChromBPNet (kundajelab, TensorFlow): attribution for cbp runs with
+# backend tf, the default. chrombpnet 1.0.1 pins TensorFlow 2.8.0, kundajelab-shap,
+# deeplift and deepdish itself; CUDA 11.2 / cuDNN 8.1 are what TensorFlow 2.8 was built
+# against. Exact versions: envs/locks/chrombpnet.*
+name: motifline-chrombpnet
+channels: [conda-forge]
+dependencies:
+  - python=3.8
+  - cudatoolkit=11.2
+  - cudnn=8.1
+  - pip
+  - pip:
+      - chrombpnet==1.0.1

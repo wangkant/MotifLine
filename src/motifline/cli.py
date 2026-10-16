@@ -1,4 +1,4 @@
-"""motifline init | check | run | smoke. `run` checks the config, then calls snakemake.
+"""motifline init | check | run | smoke | merge-h5. `run` checks the config, then calls snakemake.
 
 The directory motifline runs in is the project: config/default.yaml, results/ and
 relative paths in the config are all taken from it. The Snakefile ships with the package.
@@ -6,6 +6,7 @@ relative paths in the config are all taken from it. The Snakefile ships with the
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -158,6 +159,28 @@ def cmd_smoke(args) -> int:
                      keep=args.keep)
 
 
+def cmd_merge_h5(args) -> int:
+    env = args.compute_env
+    if not env:
+        try:
+            env = compute_env(load(args.config))
+        except ConfigError as e:
+            print(f"{e}\n(or pass --compute-env)", file=sys.stderr)
+            return 1
+    python = Path(env or "", "bin", "python")
+    if not env or not os.access(python, os.X_OK):
+        print(f"{python} is not an executable interpreter; the compute env holds PyTables",
+              file=sys.stderr)
+        return 1
+    argv = [str(python), str(PACKAGE / "steps" / "merge_chrombpnet_h5.py"),
+            "--out_prefix", args.out_prefix]
+    for prefix in args.shard_prefix:
+        argv += ["--shard_prefix", prefix]
+    if args.check_bed:
+        argv += ["--check_bed", args.check_bed]
+    return subprocess.run(argv).returncode
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="motifline",
@@ -198,6 +221,21 @@ def build_parser() -> argparse.ArgumentParser:
                        help="an empty or new directory for the smoke run (default: a temp dir)")
     smoke.add_argument("--keep", action="store_true", help="keep the working directory")
     smoke.set_defaults(fn=cmd_smoke)
+
+    merge = sub.add_parser(
+        "merge-h5", help="stack sharded chrombpnet interpret output into one prefix "
+                         "for adopt_format: chrombpnet_h5")
+    merge.add_argument("--shard-prefix", action="append", required=True,
+                       help="<dir>/<prefix> of one shard's .counts_scores.h5 and "
+                            ".interpreted_regions.bed; once per shard, in shard order")
+    merge.add_argument("--out-prefix", required=True)
+    merge.add_argument("--check-bed", default=None,
+                       help="the peak bed the shards were cut from; the joined regions must "
+                            "equal it row for row")
+    merge.add_argument("-c", "--config", default=DEFAULT_CONFIG)
+    merge.add_argument("--compute-env", default=None,
+                       help="env prefix holding PyTables (default: envs.compute from the config)")
+    merge.set_defaults(fn=cmd_merge_h5)
     return p
 
 

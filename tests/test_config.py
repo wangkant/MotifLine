@@ -10,7 +10,7 @@ from motifline.config import ConfigError, check, load, problems, skeleton
 def cfg_cbp(**over):
     """A structurally valid config with one computed ChromBPNet run."""
     base = {
-        "envs": {"compute": "/e/compute"},
+        "envs": {"compute": "/e/compute", "chrombpnet": "/e/chrombpnet"},
         "chrombpnet_src": "/m/chrombpnet",
         "genome": {"fasta": "/g/hg38.fa", "chrom_sizes": "/g/hg38.chrom.sizes"},
         "attribution": {"n_shuffles": 20, "random_state": 42},
@@ -22,7 +22,7 @@ def cfg_cbp(**over):
             "h14_annotation": "/l/H14CORE_annotation.jsonl",
             "qval_threshold": 0.05,
         },
-        "runs": {"r1": {"model": "cbp", "wo_bias": "/m/wo_bias.pt", "peaks": "p.bed"}},
+        "runs": {"r1": {"model": "cbp", "wo_bias": "/m/chrombpnet_nobias.h5", "peaks": "p.bed"}},
     }
     base.update(over)
     return base
@@ -322,3 +322,58 @@ def test_run_names_that_are_not_plain_strings_are_refused():
     assert len(found) == 1
     assert all(repr(n) in found[0] for n in bad) and "k562_cbp.v2-a" not in found[0]
 
+
+
+# --- ChromBPNet: official TensorFlow code or PyTorch port --------------------
+
+def test_a_cbp_run_uses_the_official_code_unless_it_says_pytorch():
+    from motifline.config import tf_cbp
+    assert tf_cbp({"model": "cbp"}) and tf_cbp({"model": "cbp", "backend": "tf"})
+    assert not tf_cbp({"model": "cbp", "backend": "pytorch"})
+    assert not tf_cbp({"model": "ag"})
+
+
+def test_an_official_chrombpnet_run_needs_its_env_but_not_the_pytorch_checkout():
+    c = cfg_cbp()
+    del c["chrombpnet_src"]
+    assert problems(c, paths=False) == []
+    del c["envs"]["chrombpnet"]
+    assert only(problems(c, paths=False), "envs.chrombpnet")
+
+
+def test_a_pytorch_run_needs_the_checkout_but_not_the_tensorflow_env():
+    c = cfg_cbp()
+    c["runs"]["r1"].update(backend="pytorch", wo_bias="/m/wo_bias.pt")
+    del c["envs"]["chrombpnet"]
+    assert problems(c, paths=False) == []
+    del c["chrombpnet_src"]
+    assert only(problems(c, paths=False), "chrombpnet_src")
+
+
+def test_an_unknown_backend_is_reported():
+    c = cfg_cbp()
+    c["runs"]["r1"]["backend"] = "jax"
+    assert only(problems(c, paths=False), "runs.r1.backend")
+
+
+def test_backend_belongs_to_computed_cbp_runs_only():
+    c = cfg_cbp(runs={
+        "a1": {"model": "cbp", "adopt_from": "/arch/x", "rows": 10, "backend": "tf"},
+        "g1": {"model": "ag", "ag_src": "/a", "weights": "/m/w.pt", "peaks": "p.bed",
+               "track": 60, "biosample": "K562", "chunk": 100, "backend": "tf"}})
+    p = problems(c, paths=False)
+    assert only(p, "runs.a1: unknown key") and only(p, "runs.g1: unknown key")
+
+
+def test_the_official_code_reads_no_chrom_sizes():
+    from motifline.config import attr_inputs
+    c = cfg_cbp()
+    sizes = c["genome"]["chrom_sizes"]
+    assert sizes not in attr_inputs(c, c["runs"]["r1"])
+    assert sizes in attr_inputs(c, {**c["runs"]["r1"], "backend": "pytorch"})
+
+
+def test_check_finds_a_chrombpnet_env_without_python(tmp_path):
+    c = cfg_cbp()
+    c["envs"]["chrombpnet"] = str(tmp_path)
+    assert only(problems(c, paths=True, base=tmp_path), "envs.chrombpnet/bin/python")

@@ -1,5 +1,6 @@
 """Paths for tests that need a real compute env: MOTIFLINE_COMPUTE_ENV /
-MOTIFLINE_CHROMBPNET_SRC, or config/default.yaml. Those tests skip without one."""
+MOTIFLINE_CHROMBPNET_SRC / MOTIFLINE_CHROMBPNET_ENV, or config/default.yaml. Those tests
+skip without one."""
 from __future__ import annotations
 
 import os
@@ -43,6 +44,13 @@ CHROMBPNET_SRC = os.environ.get("MOTIFLINE_CHROMBPNET_SRC") or _from_config("chr
 has_compute = pytest.mark.skipif(
     not (COMPUTE and shutil.which("modisco", path=f"{COMPUTE}/bin")),
     reason="set MOTIFLINE_COMPUTE_ENV, or configure envs.compute, to run this")
+
+#: The official ChromBPNet env (TensorFlow), or None.
+CBP_ENV = os.environ.get("MOTIFLINE_CHROMBPNET_ENV") or _from_config("envs", "chrombpnet")
+
+has_cbp_env = pytest.mark.skipif(
+    not (CBP_ENV and Path(CBP_ENV, "bin", "python").is_file()),
+    reason="set MOTIFLINE_CHROMBPNET_ENV, or configure envs.chrombpnet, to run this")
 
 has_chrombpnet_src = pytest.mark.skipif(
     not (CHROMBPNET_SRC and Path(CHROMBPNET_SRC).is_dir()),

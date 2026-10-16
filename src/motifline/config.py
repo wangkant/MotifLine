@@ -15,12 +15,16 @@ from motifline import naming as nm
 
 MODELS = ("cbp", "ag")
 
+# ChromBPNet attribution: the official TensorFlow code (envs.chrombpnet) or the PyTorch
+# port (chrombpnet_src, in envs.compute)
+CBP_BACKENDS = ("tf", "pytorch")
+
 COMMON_KEYS = {"model", "head", "n_shards", "rows", "in_window",
                "cancelled", "cancelled_note", "notes"}
 
 # per model: keys a computed run must declare, and keys it may
 MODEL_KEYS = {
-    "cbp": (("wo_bias", "peaks"), {"n_shuffles", "random_state"}),
+    "cbp": (("wo_bias", "peaks"), {"backend", "n_shuffles", "random_state"}),
     "ag": (("ag_src", "weights", "peaks", "track", "biosample", "chunk"),
            {"crop", "n_shuffles", "random_state"}),
 }
@@ -35,7 +39,7 @@ TOP_LEVEL_KEYS = {"envs", "chrombpnet_src", "genome", "attribution",
                   "modisco", "finemo", "reference_lexicon", "runs"}
 
 SECTION_KEYS = {
-    "envs": {"compute"},
+    "envs": {"compute", "chrombpnet"},
     "genome": {"fasta", "chrom_sizes"},
     "attribution": {"n_shuffles", "random_state"},
     "modisco": {"max_seqlets", "window", "n_leiden"},
@@ -102,9 +106,14 @@ def _run_name_ok(name) -> bool:
             and not any(c in name for c in "/=") and not any(c.isspace() for c in name))
 
 
-def _computed_models(runs: dict) -> set[str]:
-    return {r.get("model") for r in runs.values()
-            if isinstance(r, dict) and not r.get("adopt_from")}
+def tf_cbp(r: dict) -> bool:
+    """A ChromBPNet run computed with the official TensorFlow code (backend tf, the default)."""
+    return r.get("model") == "cbp" and r.get("backend", "tf") == "tf"
+
+
+def _computed(runs: dict) -> list[dict]:
+    return [r for r in runs.values() if isinstance(r, dict) and not r.get("adopt_from")
+            and r.get("model") in MODELS]
 
 
 def _require(cfg: dict, dotted: str) -> list[str]:
@@ -131,15 +140,19 @@ def _structure(cfg: dict, runs: dict) -> list[str]:
                    "finemo.mode", "finemo.threshold", "finemo.alpha", "finemo.batch"):
         out += _require(cfg, dotted)
 
-    computed = _computed_models(runs)
+    computed = _computed(runs)
     if any(isinstance(r, dict) and r.get("adopt_format") == "chrombpnet_h5"
            for r in runs.values()):
         out += _require(cfg, "genome.fasta")
     if computed:
         out += _require(cfg, "genome.fasta") + _require(cfg, "genome.chrom_sizes")
-        out += _require(cfg, "chrombpnet_src")
         out += _require(cfg, "attribution.n_shuffles")
         out += _require(cfg, "attribution.random_state")
+    if any(tf_cbp(r) for r in computed):
+        out += _require(cfg, "envs.chrombpnet")
+    if any(not tf_cbp(r) for r in computed):
+        # the PyTorch port, and AlphaGenome's step, which reads chrom sizes with its code
+        out += _require(cfg, "chrombpnet_src")
     win = (cfg.get("modisco") or {}).get("window")
     if win is not None and not (isinstance(win, int) and win > 0):
         out.append(f"modisco.window: must be a positive integer, not {win!r}")
@@ -185,6 +198,8 @@ def _run_structure(name: str, r) -> list[str]:
     if track is not None and not (isinstance(track, int) and not isinstance(track, bool)
                                   and track >= 0):
         out.append(f"runs.{name}.track: must be a non-negative integer, not {track!r}")
+    if "backend" in r and r["backend"] not in CBP_BACKENDS:
+        out.append(f"runs.{name}.backend: {r['backend']!r} is not one of {list(CBP_BACKENDS)}")
     fmt = r.get("adopt_format", "npy")
     if fmt not in ADOPT_FORMATS:
         out.append(f"runs.{name}.adopt_format: {fmt!r} is not one of {list(ADOPT_FORMATS)}")
@@ -294,6 +309,11 @@ def _paths(cfg: dict, runs: dict, base: Path) -> list[str]:
         for binary in COMPUTE_BINARIES:
             out += _exists(base, f"envs.compute/bin/{binary}",
                            _resolve(base, compute) / "bin" / binary, kind="exe")
+    cbp_env = envs.get("chrombpnet")
+    out += _exists(base, "envs.chrombpnet", cbp_env, kind="dir")
+    if cbp_env and _resolve(base, cbp_env).is_dir():
+        out += _exists(base, "envs.chrombpnet/bin/python",
+                       _resolve(base, cbp_env) / "bin" / "python", kind="exe")
     out += _exists(base, "chrombpnet_src", cfg.get("chrombpnet_src"), kind="dir")
     genome = cfg.get("genome") or {}
     out += _exists(base, "genome.fasta", genome.get("fasta"))
@@ -328,9 +348,11 @@ def _paths(cfg: dict, runs: dict, base: Path) -> list[str]:
 
 
 def attr_inputs(cfg: dict, r: dict) -> list[str]:
-    """Files a computed run's attribution reads; the Snakefile declares them as inputs."""
+    """Files a computed run's attribution reads; the Snakefile declares them as inputs.
+    The official ChromBPNet code reads no chrom sizes."""
     model_file = r["wo_bias"] if r["model"] == "cbp" else r["weights"]
-    return [model_file, r["peaks"], cfg["genome"]["fasta"], cfg["genome"]["chrom_sizes"]]
+    files = [model_file, r["peaks"], cfg["genome"]["fasta"]]
+    return files if tf_cbp(r) else files + [cfg["genome"]["chrom_sizes"]]
 
 
 def missing_attr_inputs(cfg: dict, base=".") -> list[str]:

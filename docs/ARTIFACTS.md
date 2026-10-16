@@ -8,8 +8,8 @@ finished only once its target has rerun cleanly.
 `run_info.json` is deleted when a stage starts and written only after it succeeds:
 `stage`, the exact `argv`, the `param_sig` the rule reruns on, the `env` prefix and the
 `tools` versions that env reports, `host`, `started`/`finished`, the `motifline`
-version, and `code`: for motifline (plus `chrombpnet_src` / `ag_src` for attribution
-stages) the git commit, with a digest appended when the checkout has uncommitted
+version, and `code`: for motifline (plus `chrombpnet_src` / `ag_src` for PyTorch-port and
+AlphaGenome attribution stages) the git commit, with a digest appended when the checkout has uncommitted
 changes, or, for code that is not in git (an installed package), `commit: null` and a
 `sha256` of its `.py` files and Snakefile.
 
@@ -27,23 +27,24 @@ Hypothetical scores give ~1.0, projected ones ~0.25; the files are otherwise ide
 |---|---|
 | `attr.npy` | `(N, 4, W)` `float32`, hypothetical contribution scores |
 | `ohe.npy` | `(N, 4, W)` `int8`, the one-hot input the scores belong to |
-| `regions.bed` | `N` lines, 11 tab-separated columns |
+| `regions.bed` | `N` lines, 10 (official ChromBPNet) or 11 tab-separated columns |
 
 `W` is the stored width; downstream stages read it from `attr.npy`. Defaults: CBP
-2114 bp; AG 2048 bp in and 2048 bp kept. 2048 bp is this pipeline's choice for AG,
+2114 bp (the official ChromBPNet: the model's input length); AG 2048 bp in and 2048 bp kept. 2048 bp is this pipeline's choice for AG,
 not the model's training context (~1 Mb).
 
 Sharded runs write `attr_<i>.npy` / `ohe_<i>.npy` / `regions_<i>.bed`.
 
 `regions.bed` is narrowPeak-shaped because finemo reads the summit from column 10.
-CBP writes chrombpnet's `load_region_df` frame; AG writes the same 11 columns
+The official ChromBPNet writes chrombpnet's `interpreted_regions.bed`; the PyTorch port
+writes its `load_region_df` frame; AG writes the same 11 columns
 (`attr_ag.narrowpeak_text`, identical to `adopt.normalize_peaks`).
 
-**`N` is usually smaller than the peak count.** Both models drop:
-
-- peaks whose window runs off the chromosome (`summit ± in_window/2`);
-- peaks whose analysed window contains a non-ACGT base (CBP: the 2114 bp input; AG:
-  the central `crop` bp).
+**`N` can be smaller than the peak count.** Every path drops peaks whose window runs
+off the chromosome (`summit ± in_window/2`). The PyTorch port and AG also drop peaks
+whose analysed window contains a non-ACGT base (CBP: the 2114 bp input; AG: the
+central `crop` bp); the official ChromBPNet keeps them, with all-zero one-hot columns,
+as chrombpnet does.
 
 Peak files with two peaks sharing a summit, or with chromosomes absent from
 `chrom_sizes`, are refused. With different windows (2114 vs 2048) the two models
@@ -53,7 +54,27 @@ When AG's input is wider than `crop`, non-ACGT bases in the flanks are set to `A
 the input is valid one-hot. `n_filled.tsv` (`chr, start, summit, n_filled`) lists
 those peaks; an empty table means none.
 
-`convergence.json` (both models) records tangermeme's DeepLIFT check: for each
+### The official ChromBPNet
+
+cbp runs without `backend: pytorch` run chrombpnet's own interpret entry point
+(`chrombpnet.evaluation.interpret.interpret.main`) on the run's peaks, counts head only,
+and convert what it writes as `import_attr` does below: `attr.npy` is `/shap/seq`
+(float16 in chrombpnet's file, float32 here), `ohe.npy` is `/raw/seq`, and nothing is
+written unless the scores are hypothetical, `/projected_shap` equals `raw * shap`, and
+every row equals the genome. chrombpnet's files stay in the directory:
+`chrombpnet.counts_scores.h5`, `chrombpnet.interpreted_regions.bed`,
+`chrombpnet.interpret.args.json`, and `input_peaks.bed`, the peaks it was given (10
+columns); sharded runs add `_<i>`.
+
+The references are `n_shuffles` dinucleotide shuffles from deeplift, shuffle k drawn
+from `RandomState(random_state + k)`; the official code leaves them unseeded. The stage
+fails unless chrombpnet asked for references once per sequence, so the seeding cannot
+be bypassed silently. There is no `convergence.json`: the official DeepSHAP has no
+such check.
+
+### tangermeme paths
+
+`convergence.json` (AlphaGenome and the ChromBPNet PyTorch port) records tangermeme's DeepLIFT check: for each
 (sequence, reference) pair, |f(x) − f(ref) − Σ attributions|. It holds the threshold
 (1e-3, tangermeme's default), the number of pairs, how many exceeded it and the largest
 delta. Nothing is decided on it; a large share over the threshold means the

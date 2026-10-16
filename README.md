@@ -13,7 +13,8 @@ these stages, with a shared downstream workflow for both supported models.
 
 ## What it does
 
-- **Discover motifs:** compute DeepLIFT/SHAP attributions with tangermeme and
+- **Discover motifs:** compute DeepLIFT/SHAP attributions (ChromBPNet: the official
+  TensorFlow DeepSHAP from chrombpnet's interpret step; AlphaGenome: tangermeme) and
   identify recurring patterns with TF-MoDISco through modisco-lite.
 - **Locate motif occurrences:** use FiNeMo to call motif hits across the analyzed regions.
 - **Annotate patterns:** match motifs with TomTom against the union of the
@@ -37,8 +38,8 @@ windows and retained regions can still differ; see the [output reference](https:
 Genomic peaks + model weights + reference genome
                      |
                      v
-       Attribute: ChromBPNet or AlphaGenome
-            tangermeme DeepLIFT/SHAP
+   Attribute: ChromBPNet (official TensorFlow DeepSHAP)
+          or AlphaGenome (tangermeme DeepLIFT/SHAP)
                      |
           attr.npy / ohe.npy / regions.bed
                      |
@@ -70,7 +71,7 @@ matches each pattern against it, and the best match gives the name.
 ## Installation
 
 motifline is a Python package; the workflow, the steps and the environment recipes
-ship inside it. The analysis itself needs two more conda environments, model source
+ship inside it. The analysis itself needs three more conda environments, model source
 checkouts, model weights and reference data. Follow the [installation guide](https://github.com/wangkant/motifline/blob/main/docs/INSTALL.md) for the complete
 setup, including CUDA requirements and reference file formats.
 
@@ -81,12 +82,14 @@ mkdir my-analysis && cd my-analysis
 motifline init                 # config/default.yaml, plus envs/ with recipes and locks
 
 ENVS=$HOME/motifline-envs
-conda env create -p "$ENVS/compute" -f envs/compute.yaml
-conda env create -p "$ENVS/meme"    -f envs/meme.yaml
+conda env create -p "$ENVS/compute"    -f envs/compute.yaml
+conda env create -p "$ENVS/chrombpnet" -f envs/chrombpnet.yaml
+conda env create -p "$ENVS/meme"       -f envs/meme.yaml
 ```
 
-The environment motifline is installed in runs snakemake; the steps run in
-`compute` and TomTom in `meme`, whose prefixes go in the config.
+The environment motifline is installed in runs snakemake. ChromBPNet attribution runs
+in `chrombpnet` (the official TensorFlow code), the other steps in `compute`, and
+TomTom in `meme`; their prefixes go in the config.
 
 **AlphaGenome requires the `deeplift-support` branch of Ruchir Rastogi's
 `alphagenome-pytorch` fork.** The attribution rules used here are not included in
@@ -96,7 +99,8 @@ ATAC `track` and its `biosample`; the step checks the pair against AlphaGenome's
 metadata.
 
 For computed runs, provide a reference genome and a 10- or 11-column narrowPeak
-file with summit offsets in column 10, plus the model checkpoint. The repository
+file with summit offsets in column 10, plus the model: for ChromBPNet, the Keras
+model chrombpnet trains without the bias (`chrombpnet_nobias.h5`). The repository
 includes an example K562 peak set.
 
 ## Quick start
@@ -130,9 +134,10 @@ and cancelled runs, along with shared parameters and reference settings.
 | Setting | Behavior |
 |---|---|
 | `model: cbp` or `model: ag` | Select ChromBPNet or AlphaGenome. |
+| `backend: pytorch` (cbp) | Compute ChromBPNet attributions with the PyTorch port instead of the official TensorFlow code, the default. |
 | `track` + `biosample` (AG) | ATAC head index and the biosample it must be. |
 | `adopt_from` | Reuse attributions computed elsewhere (`attr.npy` + `ohe.npy`) and run downstream stages. |
-| `adopt_format: chrombpnet_h5` | Import official TensorFlow ChromBPNet `counts_scores.h5` + `interpreted_regions.bed`, checked row by row against the genome. |
+| `adopt_format: chrombpnet_h5` | Import official ChromBPNet `counts_scores.h5` + `interpreted_regions.bed` computed elsewhere, checked row by row against the genome. `motifline merge-h5` stacks a sharded interpret run into one. |
 | `n_shards` | Split attribution into GPU shards, then merge the results. |
 | Neither `adopt_from` nor `n_shards` | Compute attributions in one process. |
 | `cancelled: true` | Exclude the run from default targets and freeze its `attr/`: it is never recomputed or re-adopted, and downstream stages can still be rebuilt from it by explicit target. |
@@ -169,8 +174,9 @@ files include:
 | `run_info.json` | Per-stage execution metadata and provenance. |
 
 Use `regions.bed` as the row key for downstream analysis: peaks whose window runs
-off the chromosome or contains a non-ACGT base are dropped, so rows can differ from
-the peak file and between models.
+off the chromosome are dropped, and so are peaks with a non-ACGT base except on the
+official ChromBPNet path, which keeps them as chrombpnet does. Rows can therefore
+differ from the peak file and between models.
 See [docs/ARTIFACTS.md](https://github.com/wangkant/motifline/blob/main/docs/ARTIFACTS.md) for stage directories, array shapes,
 checkpoint behavior, and model-specific details.
 
@@ -179,7 +185,7 @@ checkpoint behavior, and model-specific details.
 ```text
 src/motifline/            CLI, validation, attribution, naming, and orchestration
 src/motifline/Snakefile   Snakemake workflow
-src/motifline/steps/      Scripts executed in the compute environment
+src/motifline/steps/      Scripts executed in the compute and chrombpnet environments
 src/motifline/envs/       Environment recipes and exact package locks
 config/example.yaml       Example runs and shared settings
 config/peaks/             Example K562 peak set
@@ -196,12 +202,14 @@ the underlying tools and methods relevant to your analysis.
 
 | tool | version here | where |
 |---|---|---|
-| ChromBPNet (official, TensorFlow; contribution scores imported with `adopt_format: chrombpnet_h5`) | — | github.com/kundajelab/chrombpnet |
-| ChromBPNet (PyTorch port; the `attribute` rule) | `jsxlei/chrombpnet-pytorch@01ad10b` | github.com/jsxlei/chrombpnet-pytorch |
+| ChromBPNet (official, TensorFlow; the `attribute` rule for cbp runs, and `adopt_format: chrombpnet_h5`) | 1.0.1 | github.com/kundajelab/chrombpnet |
+| DeepSHAP for TensorFlow, as ChromBPNet uses it | `kundajelab-shap` 1 | github.com/kundajelab/shap |
+| DeepLIFT (dinucleotide shuffles for the ChromBPNet references) | 0.6.13.0 | github.com/kundajelab/deeplift |
+| ChromBPNet (PyTorch port; `backend: pytorch`) | `jsxlei/chrombpnet-pytorch@01ad10b` | github.com/jsxlei/chrombpnet-pytorch |
 | AlphaGenome (the model) | — | github.com/google-deepmind/alphagenome |
 | AlphaGenome PyTorch port | `genomicsxai/alphagenome-pytorch` | github.com/genomicsxai/alphagenome-pytorch |
 | AlphaGenome DeepLIFT rules | `rastogiruchir/alphagenome-pytorch@64e9b75`, branch `deeplift-support` | Ruchir Rastogi — github.com/rastogiruchir/alphagenome-pytorch |
-| tangermeme | 1.0.4 | github.com/jmschrei/tangermeme |
+| tangermeme (AlphaGenome and the ChromBPNet PyTorch port) | 1.0.4 | github.com/jmschrei/tangermeme |
 | modisco-lite | 2.4.0 | github.com/jmschrei/tfmodisco-lite |
 | FiNeMo | 0.30 (`austintwang/finemo_gpu@5c6f521`) | github.com/austintwang/finemo_gpu |
 | HOCOMOCO | H14 CORE | hocomoco.autosome.org |
