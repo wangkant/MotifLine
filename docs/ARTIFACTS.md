@@ -8,8 +8,8 @@ finished only once its target has rerun cleanly.
 `run_info.json` is deleted when a stage starts and written only after it succeeds:
 `stage`, the exact `argv`, the `param_sig` the rule reruns on, the `env` prefix and the
 `tools` versions that env reports, `host`, `started`/`finished`, the `motifline`
-version, and `code`: for motifline (plus `chrombpnet_src` / `ag_src` for PyTorch-port and
-AlphaGenome attribution stages) the git commit, with a digest appended when the checkout has uncommitted
+version, and `code`: for motifline (plus `ag_src` for AlphaGenome
+attribution stages) the git commit, with a digest appended when the checkout has uncommitted
 changes, or, for code that is not in git (an installed package), `commit: null` and a
 `sha256` of its `.py` files and Snakefile.
 
@@ -36,14 +36,12 @@ not the model's training context (~1 Mb).
 Sharded runs write `attr_<i>.npy` / `ohe_<i>.npy` / `regions_<i>.bed`.
 
 `regions.bed` is narrowPeak-shaped because finemo reads the summit from column 10.
-The official ChromBPNet writes chrombpnet's `interpreted_regions.bed`; the PyTorch port
-writes its `load_region_df` frame; AG writes the same 11 columns
+The official ChromBPNet writes chrombpnet's `interpreted_regions.bed`; AG writes the same 11 columns
 (`attr_ag.narrowpeak_text`, identical to `adopt.normalize_peaks`).
 
 **`N` can be smaller than the peak count.** Every path drops peaks whose window runs
-off the chromosome (`summit ± in_window/2`). The PyTorch port and AG also drop peaks
-whose analysed window contains a non-ACGT base (CBP: the 2114 bp input; AG: the
-central `crop` bp); the official ChromBPNet keeps them, with all-zero one-hot columns,
+off the chromosome (`summit ± in_window/2`). AG also drops peaks
+whose analysed window (the central `crop` bp) contains a non-ACGT base; the official ChromBPNet keeps them, with all-zero one-hot columns,
 as chrombpnet does.
 
 Peak files with two peaks sharing a summit, or with chromosomes absent from
@@ -56,7 +54,7 @@ those peaks; an empty table means none.
 
 ### The official ChromBPNet
 
-cbp runs without `backend: pytorch` run chrombpnet's own interpret entry point
+Computed cbp runs run chrombpnet's own interpret entry point
 (`chrombpnet.evaluation.interpret.interpret.main`) on the run's peaks, counts head only,
 and convert what it writes as `import_attr` does below: `attr.npy` is `/shap/seq`
 (float16 in chrombpnet's file, float32 here), `ohe.npy` is `/raw/seq`, and nothing is
@@ -74,7 +72,7 @@ such check.
 
 ### tangermeme paths
 
-`convergence.json` (AlphaGenome and the ChromBPNet PyTorch port) records tangermeme's DeepLIFT check: for each
+`convergence.json` (AlphaGenome) records tangermeme's DeepLIFT check: for each
 (sequence, reference) pair, |f(x) − f(ref) − Σ attributions|. It holds the threshold
 (1e-3, tangermeme's default), the number of pairs, how many exceeded it and the largest
 delta. Nothing is decided on it; a large share over the threshold means the

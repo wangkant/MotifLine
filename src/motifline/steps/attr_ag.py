@@ -30,8 +30,6 @@ def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ag_src", required=True,
                     help="src/ of the alphagenome-pytorch deeplift-support checkout")
-    ap.add_argument("--chrombpnet_src", required=True,
-                    help="chrombpnet-pytorch checkout (read_chrom_sizes)")
     ap.add_argument("--weights", required=True, help="AlphaGenome checkpoint")
     ap.add_argument("--peaks", required=True)
     ap.add_argument("--fasta", required=True)
@@ -133,7 +131,6 @@ def check_chunk_identity(cdir, want):
 
 def main():
     a = parse_args()
-    sys.path.insert(0, a.chrombpnet_src)
     sys.path.insert(0, a.ag_src)
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import numpy as np

@@ -47,7 +47,7 @@ conda env create -p $ENVS/meme       -f envs/meme.yaml
 | env | config key | runs | needed for |
 |---|---|---|---|
 | orchestration | — | snakemake, `motifline` | always |
-| compute | `envs.compute` | MoDISco, FiNeMo, AlphaGenome and PyTorch-port attribution | always |
+| compute | `envs.compute` | MoDISco, FiNeMo, AlphaGenome attribution | always |
 | chrombpnet | `envs.chrombpnet` | official ChromBPNet attribution (TensorFlow) | computed ChromBPNet runs |
 | meme | `reference_lexicon.tomtom` | `tomtom` | naming patterns |
 
@@ -65,20 +65,12 @@ line and the index URL. The DeepLIFT/SHAP references are seeded, but a different
 torch build can change the last digits of an attribution, so record the version
 with any attributions you keep (`run_info.json` does).
 
-With `backend: pytorch`, importing the port's `chrombpnet.interpret` downloads a motif
-file and genome chrom sizes through `pooch`. On a GPU node without network access, run the import once on a
-connected node so the files are in pooch's cache.
-
 ## 3. The model code
 
-The official ChromBPNet is a package in its env. The ChromBPNet PyTorch port and
-AlphaGenome are not: the attribution steps put their checkouts on `sys.path`, and the
-config points at them. `chrombpnet_src` is needed for `backend: pytorch` runs and for
-AlphaGenome runs, which read chrom sizes with its code.
+The official ChromBPNet is a package in its env. AlphaGenome is not: its attribution
+step puts the checkout on `sys.path`, and each AG run points at it.
 
 ```bash
-git clone https://github.com/jsxlei/chrombpnet-pytorch.git          # chrombpnet_src
-git -C chrombpnet-pytorch checkout 01ad10b
 git clone -b deeplift-support https://github.com/rastogiruchir/alphagenome-pytorch.git
 git -C alphagenome-pytorch checkout 64e9b75                       # a run's ag_src = .../src
 ```
@@ -93,8 +85,7 @@ up in `alphagenome_pytorch/data/track_metadata_human.parquet` and refuses a mism
 (K562 is track 60).
 
 Model weights: a ChromBPNet run needs, as `wo_bias`, the Keras model chrombpnet trains
-without the bias (`chrombpnet_nobias.h5`). With `backend: pytorch` it needs instead a
-bias-corrected PyTorch state dict for `BPNet(512 filters, 8 layers)`. An AlphaGenome
+without the bias (`chrombpnet_nobias.h5`). An AlphaGenome
 run needs `weights` loadable by `AlphaGenome.from_pretrained`.
 
 Official ChromBPNet scores computed elsewhere can be imported instead: point an
@@ -136,8 +127,7 @@ $EDITOR config/default.yaml
 motifline check
 ```
 
-The repository's `config/example.yaml` has a sharded official ChromBPNet run, a
-PyTorch-port run, an AG run, an imported official ChromBPNet run and a cancelled
+The repository's `config/example.yaml` has a sharded official ChromBPNet run, an AG run, an imported official ChromBPNet run and a cancelled
 adopted run.
 `motifline check` reports, in one pass: missing or misspelled keys (also inside
 `modisco:`, `finemo:` and the other sections), values of the wrong type, missing

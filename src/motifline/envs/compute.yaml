@@ -1,5 +1,5 @@
-# Attribution steps, MoDISco and FiNeMo. Model code is not installed here; the steps put
-# the chrombpnet_src / ag_src checkouts on sys.path. Exact versions: envs/locks/compute.*
+# AlphaGenome attribution, MoDISco and FiNeMo. Model code is not installed here; the AG
+# step puts the ag_src checkout on sys.path. Exact versions: envs/locks/compute.*
 #
 # DeepLIFT/SHAP references are seeded, but a different torch or CUDA build can still
 # change the last digits of an attribution.

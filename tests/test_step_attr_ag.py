@@ -25,7 +25,7 @@ def test_help_runs_without_heavy_imports():
 def test_requires_ag_src():
     r = subprocess.run([sys.executable, str(STEP), "--weights", "w", "--peaks", "p",
                         "--fasta", "f", "--chrom_sizes", "c", "--out_dir", "o",
-                        "--chrombpnet_src", "s", "--hypothetical"],
+                        "--hypothetical"],
                        capture_output=True, text=True)
     assert r.returncode != 0 and "ag_src" in (r.stderr + r.stdout)
 

@@ -13,7 +13,7 @@ from snakemake.exceptions import WorkflowError
 from motifline import naming as nm
 from motifline.attribution import hyp_check
 from motifline.config import attr_inputs as attr_input_paths, missing_attr_inputs
-from motifline.config import check as check_config, tf_cbp
+from motifline.config import check as check_config
 from motifline.provenance import CBP_PACKAGES, PACKAGES
 from motifline.runs import active_runs, cancelled_runs
 from motifline.stages import run_body as _run_body
@@ -24,7 +24,7 @@ check_config(config, paths=False)
 
 ENV = config["envs"]["compute"]
 PY = f"{ENV}/bin/python"
-# the official ChromBPNet (TensorFlow): cbp runs with backend tf, the default
+# the official ChromBPNet (TensorFlow): computed cbp runs
 CBP_ENV = config["envs"].get("chrombpnet")
 STEPS = Path(workflow.basedir) / "steps"
 
@@ -92,12 +92,9 @@ def attr_inputs(w):
 
 
 def attr_code(r):
-    if tf_cbp(r):
+    if r["model"] == "cbp":
         return {}  # chrombpnet is an installed package; the env's tools record its version
-    code = {"chrombpnet_src": config["chrombpnet_src"]}
-    if r["model"] == "ag":
-        code["ag_src"] = r["ag_src"]
-    return code
+    return {"ag_src": r["ag_src"]}
 
 
 def attr_argv(r, out, shard_i=None):
@@ -108,7 +105,7 @@ def attr_argv(r, out, shard_i=None):
     random_state = str(r.get("random_state", att["random_state"]))
     if r["model"] == "ag":
         argv = [PY, str(STEPS / "attr_ag.py"),
-                "--ag_src", r["ag_src"], "--chrombpnet_src", config["chrombpnet_src"],
+                "--ag_src", r["ag_src"],
                 "--weights", r["weights"], "--peaks", r["peaks"],
                 "--fasta", config["genome"]["fasta"],
                 "--chrom_sizes", config["genome"]["chrom_sizes"],
@@ -118,19 +115,10 @@ def attr_argv(r, out, shard_i=None):
         for k in ("in_window", "crop"):
             if k in r:
                 argv += [f"--{k}", str(r[k])]
-    elif tf_cbp(r):
+    elif r["model"] == "cbp":
         argv = [f"{CBP_ENV}/bin/python", str(STEPS / "attr_cbp_tf.py"),
                 "--model_h5", r["wo_bias"], "--peaks", r["peaks"],
                 "--fasta", config["genome"]["fasta"], "--out_dir", out, "--hypothetical",
-                "--n_shuffles", n_shuffles, "--random_state", random_state]
-        if "in_window" in r:
-            argv += ["--in_window", str(r["in_window"])]
-    elif r["model"] == "cbp":
-        argv = [PY, str(STEPS / "attr_cbp.py"), "--chrombpnet_src", config["chrombpnet_src"],
-                "--wo_bias", r["wo_bias"], "--peaks", r["peaks"],
-                "--fasta", config["genome"]["fasta"],
-                "--chrom_sizes", config["genome"]["chrom_sizes"],
-                "--out_dir", out, "--hypothetical",
                 "--n_shuffles", n_shuffles, "--random_state", random_state]
         if "in_window" in r:
             argv += ["--in_window", str(r["in_window"])]
@@ -151,7 +139,7 @@ def sig_attr(w, shard_i=None):
 def attr_stage(r, out, stage, sig, checks, shard_i=None):
     """One attribution job: the official ChromBPNet in its own env, the rest in envs.compute."""
     env = thread_env(ATTR_THREADS)
-    if tf_cbp(r):
+    if r["model"] == "cbp":
         # TensorFlow otherwise reserves the whole card
         env["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
         prefix, packages = CBP_ENV, CBP_PACKAGES

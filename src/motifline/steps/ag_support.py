@@ -20,7 +20,12 @@ from alphagenome_pytorch.attribution import deeplift
 from alphagenome_pytorch.utils.sequence import sequence_to_onehot_tensor
 from tangermeme.deep_lift_shap import _nonlinear
 
-from chrombpnet.data_utils import read_chrom_sizes
+
+def read_chrom_sizes(path):
+    """chrom -> length from a two-column chrom.sizes file; other lines are skipped."""
+    with open(path) as f:
+        rows = [line.strip().split("\t") for line in f]
+    return {r[0]: int(r[1]) for r in rows if len(r) == 2}
 
 
 class AlphaGenomeWrapper(nn.Module):

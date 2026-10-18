@@ -134,7 +134,6 @@ and cancelled runs, along with shared parameters and reference settings.
 | Setting | Behavior |
 |---|---|
 | `model: cbp` or `model: ag` | Select ChromBPNet or AlphaGenome. |
-| `backend: pytorch` (cbp) | Compute ChromBPNet attributions with the PyTorch port instead of the official TensorFlow code, the default. |
 | `track` + `biosample` (AG) | ATAC head index and the biosample it must be. |
 | `adopt_from` | Reuse attributions computed elsewhere (`attr.npy` + `ohe.npy`) and run downstream stages. |
 | `adopt_format: chrombpnet_h5` | Import official ChromBPNet `counts_scores.h5` + `interpreted_regions.bed` computed elsewhere, checked row by row against the genome. `motifline merge-h5` stacks a sharded interpret run into one. |
@@ -205,11 +204,10 @@ the underlying tools and methods relevant to your analysis.
 | ChromBPNet (official, TensorFlow; the `attribute` rule for cbp runs, and `adopt_format: chrombpnet_h5`) | 1.0.1 | github.com/kundajelab/chrombpnet |
 | DeepSHAP for TensorFlow, as ChromBPNet uses it | `kundajelab-shap` 1 | github.com/kundajelab/shap |
 | DeepLIFT (dinucleotide shuffles for the ChromBPNet references) | 0.6.13.0 | github.com/kundajelab/deeplift |
-| ChromBPNet (PyTorch port; `backend: pytorch`) | `jsxlei/chrombpnet-pytorch@01ad10b` | github.com/jsxlei/chrombpnet-pytorch |
 | AlphaGenome (the model) | — | github.com/google-deepmind/alphagenome |
 | AlphaGenome PyTorch port | `genomicsxai/alphagenome-pytorch` | github.com/genomicsxai/alphagenome-pytorch |
 | AlphaGenome DeepLIFT rules | `rastogiruchir/alphagenome-pytorch@64e9b75`, branch `deeplift-support` | Ruchir Rastogi — github.com/rastogiruchir/alphagenome-pytorch |
-| tangermeme (AlphaGenome and the ChromBPNet PyTorch port) | 1.0.4 | github.com/jmschrei/tangermeme |
+| tangermeme (AlphaGenome) | 1.0.4 | github.com/jmschrei/tangermeme |
 | modisco-lite | 2.4.0 | github.com/jmschrei/tfmodisco-lite |
 | FiNeMo | 0.30 (`austintwang/finemo_gpu@5c6f521`) | github.com/austintwang/finemo_gpu |
 | HOCOMOCO | H14 CORE | hocomoco.autosome.org |

@@ -130,7 +130,6 @@ def test_configfile_is_forwarded_when_given(tmp_path):
 
 def test_the_package_ships_the_snakefile_and_the_env_recipes():
     assert "rule all:" in SNAKEFILE.read_text()
-    assert (SNAKEFILE.parent / "steps" / "attr_cbp.py").is_file()
     assert (SNAKEFILE.parent / "steps" / "attr_cbp_tf.py").is_file()
     assert (ENVS / "compute.yaml").is_file() and (ENVS / "locks" / "compute.pip.txt").is_file()
     assert (ENVS / "chrombpnet.yaml").is_file()
