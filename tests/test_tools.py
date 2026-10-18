@@ -118,3 +118,30 @@ def test_no_deviations_renders_as_a_positive_statement():
 def test_a_config_deviation_renders_key_value_and_official_value():
     line = deviations(cfg(modisco_window=500), LIVE)[0].line()
     assert "modisco.window" in line and "500" in line and "400" in line
+
+
+def _fake_tool(tmp_path, body):
+    import os
+    exe = tmp_path / "bin" / "finemo"
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.write_text("#!/bin/sh\n" + body + "\n")
+    os.chmod(exe, 0o755)
+    return str(tmp_path)
+
+
+def test_a_failing_help_raises_instead_of_reading_as_no_defaults(tmp_path):
+    import subprocess
+
+    import pytest
+    env = _fake_tool(tmp_path, "echo broken >&2; exit 3")
+    with pytest.raises(subprocess.CalledProcessError):
+        live_defaults("finemo", env)
+
+
+def test_a_help_with_no_defaults_raises(tmp_path):
+    import subprocess
+
+    import pytest
+    env = _fake_tool(tmp_path, "echo 'usage: finemo call-hits'")
+    with pytest.raises(subprocess.SubprocessError):
+        live_defaults("finemo", env)

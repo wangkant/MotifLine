@@ -47,16 +47,63 @@ def test_shards_are_stacked_in_the_order_given(tmp_path):
     assert starts == [0, 100, 200, 300, 400]
 
 
-def test_the_joined_regions_must_equal_the_peak_bed(tmp_path):
+def test_the_joined_regions_must_follow_the_peak_bed(tmp_path):
     write_shard(tmp_path / "s0", rows=2, first=0)
     write_shard(tmp_path / "s1", rows=2, first=2)
     bed = tmp_path / "peaks.bed"
     bed.write_text((tmp_path / "s1.interpreted_regions.bed").read_text()
                    + (tmp_path / "s0.interpreted_regions.bed").read_text())
-    with pytest.raises(SystemExit, match="first difference at row 0"):
+    with pytest.raises(SystemExit, match="missing or out of order"):
         step.merge([str(tmp_path / "s0"), str(tmp_path / "s1")], str(tmp_path / "all"),
                    check_bed=str(bed))
     assert not (tmp_path / "all.counts_scores.h5").exists()
+
+
+def _bed_with_extra_peak(tmp_path):
+    """The two shards' rows plus one peak (start 150, window centre 175) they lack."""
+    write_shard(tmp_path / "s0", rows=2, first=0)
+    write_shard(tmp_path / "s1", rows=2, first=2)
+    lines = ((tmp_path / "s0.interpreted_regions.bed").read_text()
+             + (tmp_path / "s1.interpreted_regions.bed").read_text()).splitlines(keepends=True)
+    extra = lines[1].replace("\t100\t", "\t150\t", 1)
+    bed = tmp_path / "peaks.bed"
+    bed.write_text("".join(lines[:2] + [extra] + lines[2:]))
+    return bed
+
+
+def test_a_peak_whose_window_runs_off_the_chromosome_may_be_missing(tmp_path):
+    bed = _bed_with_extra_peak(tmp_path)
+    sizes = tmp_path / "chrom.sizes"
+    sizes.write_text("chr1\t177\n")          # centre 175 + width 6 // 2 > 177
+    rep = step.merge([str(tmp_path / "s0"), str(tmp_path / "s1")], str(tmp_path / "all"),
+                     check_bed=str(bed), chrom_sizes=str(sizes))
+    assert rep["bed_dropped"] == 1
+
+
+def test_a_missing_peak_inside_the_chromosome_is_refused(tmp_path):
+    bed = _bed_with_extra_peak(tmp_path)
+    sizes = tmp_path / "chrom.sizes"
+    sizes.write_text("chr1\t100000\n")
+    for kw in ({}, {"chrom_sizes": str(sizes)}):
+        with pytest.raises(SystemExit, match="missing or out of order"):
+            step.merge([str(tmp_path / "s0"), str(tmp_path / "s1")], str(tmp_path / "all"),
+                       check_bed=str(bed), **kw)
+    assert not (tmp_path / "all.counts_scores.h5").exists()
+
+
+def test_a_shard_left_out_is_refused(tmp_path):
+    write_shard(tmp_path / "s0", rows=2, first=0)
+    write_shard(tmp_path / "s1", rows=2, first=2)
+    write_shard(tmp_path / "s2", rows=2, first=4)
+    bed = tmp_path / "peaks.bed"
+    bed.write_text("".join((tmp_path / f"s{i}.interpreted_regions.bed").read_text()
+                           for i in range(3)))
+    sizes = tmp_path / "chrom.sizes"
+    sizes.write_text("chr1\t100000\n")
+    for shards in (["s0", "s1"], ["s0", "s2"], ["s1", "s2"]):
+        with pytest.raises(SystemExit, match="missing or out of order"):
+            step.merge([str(tmp_path / s) for s in shards], str(tmp_path / "all"),
+                       check_bed=str(bed), chrom_sizes=str(sizes))
 
 
 def test_an_existing_output_is_never_replaced(tmp_path):

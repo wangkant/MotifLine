@@ -35,18 +35,30 @@ def now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+class _ProbeFailed(Exception):
+    pass
+
+
 @lru_cache(maxsize=None)
-def tool_versions(env_prefix: str, packages: tuple[str, ...] = PACKAGES) -> dict:
-    """Package versions as the stage's own env reports them; never raises."""
+def _probe(env_prefix: str, packages: tuple[str, ...]) -> dict:
+    """Cached only when it returns; a failure raises, so the next call probes again."""
     python = Path(env_prefix) / "bin" / "python"
     if not os.access(python, os.X_OK):
-        return {"unavailable": f"{python} is not an executable interpreter"}
+        raise _ProbeFailed(f"{python} is not an executable interpreter")
     try:
         done = subprocess.run([str(python), "-c", _PROBE, *packages],
                               capture_output=True, text=True, timeout=120, check=True)
         return json.loads(done.stdout)
     except (subprocess.SubprocessError, OSError, ValueError) as e:
-        return {"unavailable": f"{type(e).__name__}: {e}"}
+        raise _ProbeFailed(f"{type(e).__name__}: {e}") from e
+
+
+def tool_versions(env_prefix: str, packages: tuple[str, ...] = PACKAGES) -> dict:
+    """Package versions as the stage's own env reports them; never raises."""
+    try:
+        return _probe(env_prefix, tuple(packages))
+    except _ProbeFailed as e:
+        return {"unavailable": str(e)}
 
 
 def code_entry(path) -> dict:

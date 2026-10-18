@@ -98,3 +98,38 @@ def test_flank_n_is_filled_with_a_and_counted():
     assert (x.sum(1) == 1).all()
     assert x[0, 0, 0] == 1 and x[0, 0, 9] == 1
     assert attr_ag.fill_with_a(_onehot("ACGT")[None]) == 0
+
+
+def _ag_support(monkeypatch):
+    import types
+    for name in ("torch", "torch.nn", "alphagenome_pytorch", "alphagenome_pytorch.layers",
+                 "alphagenome_pytorch.attribution", "alphagenome_pytorch.attribution.deeplift",
+                 "alphagenome_pytorch.utils", "alphagenome_pytorch.utils.sequence",
+                 "tangermeme", "tangermeme.deep_lift_shap"):
+        monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+    sys.modules["torch.nn"].Module = object
+    sys.modules["torch"].nn = sys.modules["torch.nn"]
+    sys.modules["alphagenome_pytorch"].layers = sys.modules["alphagenome_pytorch.layers"]
+    sys.modules["alphagenome_pytorch.attribution"].deeplift = \
+        sys.modules["alphagenome_pytorch.attribution.deeplift"]
+    sys.modules["alphagenome_pytorch.utils.sequence"].sequence_to_onehot_tensor = None
+    sys.modules["tangermeme.deep_lift_shap"]._nonlinear = None
+    spec = importlib.util.spec_from_file_location("ag_support_t", STEPS / "ag_support.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class _Rec:
+    def __init__(self, seq):
+        self.seq = seq
+
+    def __getitem__(self, sl):
+        return _Rec(self.seq[sl])
+
+
+def test_window_seq_uses_the_chromosome_name_as_written(monkeypatch):
+    ags = _ag_support(monkeypatch)
+    fasta = {"chr1": _Rec("AACCGGTT"), "1": _Rec("TTGGCCAA")}
+    assert ags.window_seq(fasta, "chr1", 4, 4) == "CCGG"
+    assert ags.window_seq(fasta, "1", 4, 4) == "GGCC"

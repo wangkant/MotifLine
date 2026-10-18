@@ -41,7 +41,10 @@ def snakemake_argv(targets, *, snakefile, directory, jobs=None, gpus=None, dry_r
 
 
 def compute_env(cfg) -> str | None:
-    return ((cfg.get("envs") or {}).get("compute")) or None
+    envs = cfg.get("envs") or {}
+    if not isinstance(envs, dict):
+        raise ConfigError("envs: must be a mapping (envs.compute, envs.chrombpnet, ...)")
+    return envs.get("compute") or None
 
 
 def deviation_lines(cfg) -> list[str]:
@@ -138,13 +141,23 @@ def cmd_run(args) -> int:
         print(msg, file=sys.stderr)
         return 1
     try:
-        check_config(load(configfile), paths=not args.no_check, base=project)
+        cfg = load(configfile)
     except ConfigError as e:
         print(str(e), file=sys.stderr)
-        print("\nrefusing to build the DAG on a config that cannot run; "
-              "pass --no-check to skip this", file=sys.stderr)
         return 1
-    for line in deviation_lines(load(configfile)):
+    try:
+        check_config(cfg, paths=not args.no_check, base=project)
+    except ConfigError as e:
+        print(str(e), file=sys.stderr)
+        # --no-check skips only the path checks; structural problems stay
+        if args.no_check or problems(cfg, paths=False, base=project):
+            hint = "the structural problems must be fixed in the config"
+        else:
+            hint = "pass --no-check to skip the path checks"
+        print(f"\nrefusing to build the DAG on a config that cannot run; {hint}",
+              file=sys.stderr)
+        return 1
+    for line in deviation_lines(cfg):
         print(line, file=sys.stderr)
     devices = gpu.pool(args.devices)
     gpus = args.gpus if args.gpus is not None else (len(devices) or None)
@@ -182,6 +195,8 @@ def cmd_merge_h5(args) -> int:
         argv += ["--shard_prefix", prefix]
     if args.check_bed:
         argv += ["--check_bed", args.check_bed]
+    if args.chrom_sizes:
+        argv += ["--chrom_sizes", args.chrom_sizes]
     return subprocess.run(argv).returncode
 
 
@@ -202,7 +217,7 @@ def build_parser() -> argparse.ArgumentParser:
     chk = sub.add_parser("check", help="report everything wrong with a config, at once")
     chk.add_argument("-c", "--config", default=DEFAULT_CONFIG)
     chk.add_argument("--no-paths", action="store_true",
-                     help="check structure only; do not touch the filesystem")
+                     help="skip the checks that configured input paths and files exist")
     chk.set_defaults(fn=cmd_check)
 
     run = sub.add_parser("run", help="check the config, then run snakemake; arguments after -- go to snakemake")
@@ -240,6 +255,9 @@ def build_parser() -> argparse.ArgumentParser:
     merge.add_argument("--check-bed", default=None,
                        help="the peak bed the shards were cut from; the joined regions must "
                             "equal it row for row")
+    merge.add_argument("--chrom-sizes", default=None,
+                       help="with --check-bed: peaks chrombpnet dropped because their window "
+                            "runs off the chromosome may be missing, and only those")
     merge.add_argument("-c", "--config", default=DEFAULT_CONFIG)
     merge.add_argument("--compute-env", default=None,
                        help="env prefix holding PyTables (default: envs.compute from the config)")

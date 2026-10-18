@@ -276,3 +276,19 @@ def test_merge_h5_runs_the_step_in_the_given_env(tmp_path):
                "--compute-env", sys.prefix])
     assert rc == 0
     assert len((tmp_path / "all.interpreted_regions.bed").read_text().splitlines()) == 5
+
+
+def test_run_suggests_no_check_only_for_path_problems(tmp_path, monkeypatch, capsys):
+    import motifline.cli as cli
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **k: pytest.fail("snakemake ran"))
+    cfg = write_cfg(tmp_path)
+    assert main(["run", "-c", str(cfg)]) != 0
+    assert "pass --no-check" in capsys.readouterr().err
+
+    bad = cfg_cbp()
+    del bad["modisco"]["window"]
+    cfg = write_cfg(tmp_path, bad)
+    for argv in (["run", "-c", str(cfg)], ["run", "-c", str(cfg), "--no-check"]):
+        assert main(argv) != 0
+        err = capsys.readouterr().err
+        assert "--no-check" not in err and "must be fixed in the config" in err

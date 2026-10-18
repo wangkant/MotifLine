@@ -1,6 +1,7 @@
-# attribute (cbp | ag) -> discover -> extract_regions -> call_hits -> finemo_report
-#                                  \-> name_patterns (TomTom vs lexicon_union)
-#                                  \-> modisco_report
+# attribute (cbp | ag) -> attr/ -+-> discover --------+-> call_hits -> finemo_report
+#                                |    |-> name_patterns (TomTom vs lexicon_union)
+#                                |    \-> modisco_report
+#                                \-> extract_regions -/
 import json
 import os
 import re
@@ -152,7 +153,8 @@ def attr_argv(r, out, shard_i=None):
 
 
 def sig_attr(w, shard_i=None):
-    # interpreter and script paths left out: moving the checkout or env is not a new result
+    # the interpreter and script paths are left out and --out_dir is a placeholder; every
+    # other argument, checkout paths included, is in the signature
     return param_sig(argv=attr_argv(rundef(w), "<out>", shard_i=shard_i)[2:])
 
 

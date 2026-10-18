@@ -150,3 +150,11 @@ def test_an_untracked_py_file_in_a_checkout_marks_it_changed(tmp_path):
     assert first.startswith(clean + "+")
     (tmp_path / "patch.py").write_text("y = 3\n")
     assert git_commit(tmp_path) not in (clean, first)
+
+
+def test_a_failed_probe_is_not_cached(tmp_path):
+    env = tmp_path / "env"
+    assert "unavailable" in tool_versions(str(env), packages=("pytest",))
+    (env / "bin").mkdir(parents=True)
+    (env / "bin" / "python").symlink_to(sys.executable)
+    assert "pytest" in tool_versions(str(env), packages=("pytest",))

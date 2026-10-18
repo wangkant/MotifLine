@@ -16,6 +16,16 @@ def test_cuda_visible_devices_wins_over_nvidia_smi(monkeypatch):
     assert gpu.visible_devices() == []
 
 
+def test_default_pool_is_nvidia_smi_uuids(monkeypatch, tmp_path):
+    smi = tmp_path / "nvidia-smi"
+    smi.write_text('#!/bin/sh\n[ "$1" = "--query-gpu=uuid" ] || exit 1\n'
+                   'printf "GPU-aa\\nGPU-bb\\n"\n')
+    smi.chmod(0o755)
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert gpu.visible_devices() == ["GPU-aa", "GPU-bb"]
+
+
 def test_explicit_devices_override_the_environment(monkeypatch):
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
     assert gpu.pool("4,5") == ["4", "5"]

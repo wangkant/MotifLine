@@ -61,8 +61,11 @@ def _ag_nonlinear_ops(use_log_ratio_softmax=True, use_log_ratio_layernorm=False)
 
 
 def window_seq(fasta, chrom, center, L):
-    """L bp centred on `center`, the same centring as chrombpnet's get_seq."""
-    return fasta[f"chr{str(chrom).replace('chr', '')}"][center - L // 2:center + L // 2].seq
+    """L bp centred on `center`, the same centring as chrombpnet's get_seq.
+
+    `chrom` is looked up in the FASTA exactly as the peaks name it.
+    """
+    return fasta[str(chrom)][center - L // 2:center + L // 2].seq
 
 
 def onehot(seq):

@@ -89,7 +89,14 @@ def live_defaults(tool: str, env_prefix: str) -> dict:
     exe = Path(env_prefix) / "bin" / argv[0]
     done = subprocess.run([str(exe), *argv[1:]], capture_output=True, text=True,
                           timeout=300)
-    return parse_help_defaults(done.stdout + done.stderr)
+    if done.returncode != 0:
+        raise subprocess.CalledProcessError(done.returncode, done.args, done.stdout,
+                                            done.stderr)
+    found = parse_help_defaults(done.stdout + done.stderr)
+    if not found:
+        # an empty dict would read as "every parameter is on its default"
+        raise subprocess.SubprocessError(f"{exe} {' '.join(argv[1:])} printed no defaults")
+    return found
 
 
 @dataclass(frozen=True)

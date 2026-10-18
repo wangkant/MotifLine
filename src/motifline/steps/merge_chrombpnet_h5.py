@@ -7,7 +7,9 @@ shard order, values and dtypes untouched, in the layout deepdish writes (blosc l
 with shuffle, DEEPDISH_IO_VERSION on the root), and joins the shard beds line for line.
 It writes nothing unless every shard has the same nodes, each shard's bed has as many
 rows as its scores, and (with --check_bed) the joined bed's chr/start/end/summit equal
-the peak bed the shards were cut from, row for row. An existing output is never replaced.
+the peak bed the shards were cut from, row for row. chrombpnet drops peaks whose window
+runs off the chromosome; with --chrom_sizes as well, such peaks may be missing from the
+joined bed, and only such peaks: any other missing row is refused. An existing output is never replaced.
 The written file is read back and compared array by array.
 
 Runs in the compute env (PyTables) and must not import motifline.
@@ -26,7 +28,14 @@ def key_cols(line):
     return (c[0], int(c[1]), int(c[2]), int(c[9]))
 
 
-def merge(shard_prefixes, out_prefix, check_bed=None):
+def off_chromosome(key, width, sizes):
+    """chrombpnet's get_seq drops a peak whose input window leaves the chromosome."""
+    chrom, start, _, summit = key
+    centre = start + summit
+    return centre - width // 2 < 0 or centre + width // 2 > sizes[chrom]
+
+
+def merge(shard_prefixes, out_prefix, check_bed=None, chrom_sizes=None):
     import tables
     arrays = {n: [] for n in NODES}
     bed_lines = []
@@ -52,11 +61,21 @@ def merge(shard_prefixes, out_prefix, check_bed=None):
     if check_bed:
         ref = [key_cols(ln) for ln in open(check_bed) if ln.strip()]
         got = [key_cols(ln) for ln in bed_lines]
-        if ref != got:
-            first = next((i for i, (x, y) in enumerate(zip(ref, got)) if x != y),
-                         min(len(ref), len(got)))
-            raise SystemExit(f"joined bed differs from {check_bed} (rows {len(got)} vs "
-                             f"{len(ref)}; first difference at row {first})")
+        sizes = ({c: int(n) for c, n, *_ in (ln.split() for ln in open(chrom_sizes) if ln.strip())}
+                 if chrom_sizes else None)
+        width = merged[NODES[0]].shape[-1]
+        j, dropped = 0, 0
+        for i, key in enumerate(got + [None]):
+            while j < len(ref) and ref[j] != key:
+                if sizes is None or not off_chromosome(ref[j], width, sizes):
+                    raise SystemExit(f"joined bed differs from {check_bed}: its row {j} {ref[j]} "
+                                     f"is missing or out of order (joined row {i})")
+                dropped += 1
+                j += 1
+            if key is not None and j == len(ref):
+                raise SystemExit(f"joined bed row {i} {key} is not in {check_bed}, "
+                                 f"or not in its order")
+            j += 1
 
     out_h5 = f"{out_prefix}.counts_scores.h5"
     out_bed = f"{out_prefix}.interpreted_regions.bed"
@@ -82,6 +101,7 @@ def merge(shard_prefixes, out_prefix, check_bed=None):
             "width": int(merged[NODES[0]].shape[-1]),
             "dtypes": {n: str(merged[n].dtype) for n in NODES},
             "shards": len(shard_prefixes), "bed_checked": bool(check_bed),
+            "bed_dropped": dropped if check_bed else None,
             "read_back_equal": True}
 
 
@@ -91,8 +111,13 @@ def main():
                     help="<dir>/<prefix> of one shard; once per shard, in shard order")
     ap.add_argument("--out_prefix", required=True)
     ap.add_argument("--check_bed", default=None, help="the peak bed the shards were cut from")
+    ap.add_argument("--chrom_sizes", default=None,
+                    help="with --check_bed: peaks whose window runs off the chromosome may be missing")
     a = ap.parse_args()
-    print(json.dumps(merge(a.shard_prefix, a.out_prefix, a.check_bed)), flush=True)
+    if a.chrom_sizes and not a.check_bed:
+        ap.error("--chrom_sizes needs --check_bed")
+    print(json.dumps(merge(a.shard_prefix, a.out_prefix, a.check_bed, a.chrom_sizes)),
+          flush=True)
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ classifiers = [
 dependencies = ["numpy", "pandas", "pyyaml", "h5py", "snakemake>=9.25,<10"]
 
 [project.optional-dependencies]
-dev = ["pytest", "scipy"]
+dev = ["pytest", "scipy", "tables", "pyfaidx"]
 
 [project.scripts]
 motifline = "motifline.cli:main"

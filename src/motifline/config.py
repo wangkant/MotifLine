@@ -224,7 +224,7 @@ def _lexicon(cfg: dict) -> list[str]:
     try:
         nm.params(cfg)
     except nm.NamingError as e:
-        return [str(e).strip("'")]
+        return [str(e.args[0]) if e.args else str(e)]
     return []
 
 
@@ -246,15 +246,20 @@ def _exists(base: Path, label: str, value, *, kind: str = "file") -> list[str]:
     return []
 
 
-def _chrom_sizes(base: Path, value) -> dict | None:
+def _chrom_sizes(base: Path, value) -> tuple[dict | None, list[str]]:
+    """(sizes, problems); sizes is None when the file is missing or malformed."""
     if value is None or not _resolve(base, value).is_file():
-        return None
+        return None, []
     sizes = {}
-    for line in _resolve(base, value).read_text().splitlines():
-        if line.strip():
-            c, n = line.split()[:2]
-            sizes[c] = int(n)
-    return sizes
+    for i, line in enumerate(_resolve(base, value).read_text().splitlines(), 1):
+        if not line.strip():
+            continue
+        cols = line.split()
+        try:
+            sizes[cols[0]] = int(cols[1])
+        except (IndexError, ValueError):
+            return None, [f"genome.chrom_sizes: line {i} is not <chrom> <int>"]
+    return sizes, []
 
 
 def _narrowpeak(base: Path, label: str, value, sizes: dict | None) -> list[str]:
@@ -302,6 +307,8 @@ def _narrowpeak(base: Path, label: str, value, sizes: dict | None) -> list[str]:
 def _paths(cfg: dict, runs: dict, base: Path) -> list[str]:
     out = []
     envs = cfg.get("envs") or {}
+    if not isinstance(envs, dict):
+        return out
     compute = envs.get("compute")
     out += _exists(base, "envs.compute", compute, kind="dir")
     if compute and _resolve(base, compute).is_dir():
@@ -317,7 +324,8 @@ def _paths(cfg: dict, runs: dict, base: Path) -> list[str]:
     genome = cfg.get("genome") or {}
     out += _exists(base, "genome.fasta", genome.get("fasta"))
     out += _exists(base, "genome.chrom_sizes", genome.get("chrom_sizes"))
-    sizes = _chrom_sizes(base, genome.get("chrom_sizes"))
+    sizes, bad = _chrom_sizes(base, genome.get("chrom_sizes"))
+    out += bad
 
     lex = cfg.get("reference_lexicon") or {}
     for tag, path in (lex.get("sources") or {}).items():

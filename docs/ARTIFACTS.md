@@ -8,7 +8,8 @@ finished only once its target has rerun cleanly.
 `run_info.json` is deleted when a stage starts and written only after it succeeds:
 `stage`, the exact `argv`, the `param_sig` the rule reruns on, the `env` prefix and the
 `tools` versions that env reports, `host`, `started`/`finished`, the `motifline`
-version, and `code`: for motifline (plus `chrombpnet_src` for PyTorch-port and `ag_src` for
+version, `device` (the GPU a GPU stage claimed from the pool, otherwise null),
+`orchestrator_python` (the Python version Snakemake ran under), and `code`: for motifline (plus `chrombpnet_src` for PyTorch-port and `ag_src` for
 AlphaGenome attribution stages) the git commit, with a digest appended when the checkout has uncommitted
 changes, or, for code that is not in git (an installed package), `commit: null` and a
 `sha256` of its `.py` files and Snakefile.
@@ -74,10 +75,15 @@ such check.
 
 ### tangermeme paths
 
+The AlphaGenome scalar is log1p of the run's ATAC `track` summed over the central
+1,000 bp of the 1 bp-resolution output.
+
 `convergence.json` (AlphaGenome and the ChromBPNet PyTorch port) records tangermeme's DeepLIFT check: for each
 (sequence, reference) pair, |f(x) − f(ref) − Σ attributions|. It holds the threshold
-(1e-3, tangermeme's default), the number of pairs, how many exceeded it and the largest
-delta. Nothing is decided on it; a large share over the threshold means the
+(1e-3, tangermeme's default), the number of pairs, how many exceeded it and
+`max_delta`. tangermeme reports deltas only for batches in which some pair exceeded the
+threshold, so `max_delta` is the largest delta among those batches, 0.0 when no pair
+exceeded it. Nothing is decided on it; a large share over the threshold means the
 attribution rules do not satisfy summation-to-delta for this model.
 
 Sharded runs write `n_filled_<i>.tsv` / `convergence_<i>.json` per shard;
@@ -85,11 +91,12 @@ Sharded runs write `n_filled_<i>.tsv` / `convergence_<i>.json` per shard;
 
 ### AG chunk checkpoints: `_chunks/` (`_chunks_<i>/` when sharded)
 
-`attr_<c>.npy` / `ohe_<c>.npy` / `n_filled_<c>.tsv` per `chunk` regions, plus
+`attr_<c>.npy` / `ohe_<c>.npy` / `n_filled_<c>.tsv` / `convergence_<c>.json` per
+`chunk` regions (a chunk is skipped on resume only when all four exist), plus
 `chunk_identity.json`. They are not stage outputs; they let a killed job resume.
 `chunk_identity.json` holds the parameters, a sha256 over every kept region and its
 sequence, the sha256 of the weights, the `ag_src` commit and the sha256 of
-`attr_ag.py` / `ag_support.py`. Resuming onto chunks
+`attr_ag.py` / `ag_support.py` / `convergence.py`. Resuming onto chunks
 with a different identity is refused; delete the directory to recompute. Chunks are
 not removed after success, so a rerun with changed inputs also stops here until
 they are deleted.
@@ -100,8 +107,8 @@ With `adopt_format: chrombpnet_h5`, the three files are written, not linked:
 `attr.npy` is `/shap/seq` of chrombpnet's `counts_scores.h5` (hypothetical, float16
 in the file, float32 here), `ohe.npy` is `/raw/seq`, and `regions.bed` is
 `interpreted_regions.bed` (10 columns). Nothing is written unless `/shap` is nonzero
-off the observed base (hypothetical, not projected), `/projected_shap` equals
-`raw * shap`, and every row's one-hot equals `genome.fasta` at `start + summit ± W/2`. chrombpnet keeps peaks with non-ACGT bases (all-zero
+off the observed base in the first 256 rows (hypothetical, not projected),
+`/projected_shap` equals `raw * shap` in every row, and every row's one-hot equals `genome.fasta` at `start + summit ± W/2`. chrombpnet keeps peaks with non-ACGT bases (all-zero
 columns), so these arrays can contain them; the count is printed in the stage log.
 
 Otherwise (`npy`):

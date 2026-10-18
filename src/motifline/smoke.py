@@ -84,17 +84,24 @@ def _run(argv, cwd) -> None:
 
 def _compute_env(explicit: str | None) -> Path:
     if explicit:
-        env = Path(explicit).resolve()
+        env, source = Path(explicit).resolve(), "--compute-env"
     else:
-        from motifline.cli import DEFAULT_CONFIG
-        from motifline.config import load
+        from motifline.cli import DEFAULT_CONFIG, compute_env
+        from motifline.config import ConfigError, load
         if not Path(DEFAULT_CONFIG).is_file():
             raise SystemExit("no --compute-env given and no config/default.yaml here to read "
                              "it from")
-        env = Path(load(DEFAULT_CONFIG)["envs"]["compute"]).resolve()
+        try:
+            value = compute_env(load(DEFAULT_CONFIG))
+        except ConfigError as e:
+            raise SystemExit(f"{e}\n(or pass --compute-env)") from e
+        if not value:
+            raise SystemExit(f"no --compute-env given and {DEFAULT_CONFIG} sets no "
+                             f"envs.compute")
+        env, source = Path(value).resolve(), f"envs.compute in {DEFAULT_CONFIG}"
     for tool in ("modisco", "finemo"):
         if not os.access(env / "bin" / tool, os.X_OK):
-            raise SystemExit(f"{env / 'bin' / tool} is not an executable; envs.compute must be "
+            raise SystemExit(f"{env / 'bin' / tool} is not an executable; {source} must be "
                              f"the compute env's prefix (absolute, or relative to here; ~ is "
                              f"not expanded)")
     return env

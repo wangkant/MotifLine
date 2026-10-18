@@ -13,7 +13,11 @@ _NUM = re.compile(r"(?<![\w.])\d+(?:\.\d*)?(?:[eE][-+]?\d+)?")
 
 
 class Deltas:
-    """Pairs over THRESHOLD and the largest delta seen inside the `with` block."""
+    """Pairs over THRESHOLD and the largest delta inside the `with` block.
+
+    tangermeme warns only for batches with some pair over the threshold, so `max` is
+    the largest delta among those warned batches, 0.0 when no pair exceeded it.
+    """
 
     def __init__(self):
         self.over = 0

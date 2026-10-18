@@ -60,7 +60,7 @@ def normalize_peaks_bed(peaks_path, out_dir):
     with open(peaks_path) as fh:
         lines = [ln.rstrip("\n") for ln in fh if ln.strip()]
     widths = {ln.count("\t") + 1 for ln in lines}
-    if widths and max(widths) <= 10:
+    if widths == {10}:
         return peaks_path
     if widths != {11}:
         raise ValueError(f"{peaks_path}: expected 10 or 11 columns, saw {sorted(widths)}")

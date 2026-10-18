@@ -1,7 +1,7 @@
 # Installing motifline
 
-The motifline package, three more conda environments, the model source checkouts
-your runs need, reference files and a config. `motifline check` reports what is still missing;
+You need the motifline package, three more conda environments, the model source
+checkouts your runs need, reference files and a config. `motifline check` reports what is still missing;
 `motifline smoke` tests the downstream half without a model.
 
 motifline only assembles command lines: each stage runs in its own environment, so
@@ -28,7 +28,7 @@ and `envs/` there, and `run` writes `results/` and snakemake's `.snakemake/` the
 Relative paths in the config are resolved against it. A config that sits in another
 project (next to its `.snakemake/`) is refused, so a run started from the wrong
 directory does not begin again from nothing. In a checkout of this repository the
-checkout root is the project, as before.
+checkout root is the project.
 
 ## 2. The environments
 
@@ -106,8 +106,12 @@ stacked into one prefix first, in envs.compute:
 
 ```bash
 motifline merge-h5 --shard-prefix run/shard_0/k562 --shard-prefix run/shard_1/k562 \
-    --out-prefix merged/k562 --check-bed peaks.bed
+    --out-prefix merged/k562 --check-bed peaks.bed --chrom-sizes hg38.chrom.sizes
 ```
+
+`--check-bed` requires the joined rows to equal that bed row for row. chrombpnet drops
+peaks whose window runs off the chromosome; with `--chrom-sizes`, such peaks may be
+missing and are counted, and any other missing or reordered row is refused.
 
 ## 4. Reference data
 
@@ -138,10 +142,25 @@ motifline check
 
 The repository's `config/example.yaml` has a sharded official ChromBPNet run, a
 PyTorch-port run, an AG run, an imported official ChromBPNet run and a cancelled
-adopted run.
+adopted run. Each entry under `runs:` defines one analysis:
+
+| Setting | Behavior |
+|---|---|
+| `model: cbp` or `model: ag` | Select ChromBPNet or AlphaGenome. |
+| `backend: pytorch` (cbp) | Compute ChromBPNet attributions with the PyTorch port instead of the official TensorFlow code, the default. |
+| `track` + `biosample` (AG) | ATAC head index and the biosample it must be. |
+| `adopt_from` | Reuse attributions computed elsewhere (`attr.npy` + `ohe.npy`) and run downstream stages. |
+| `adopt_format: chrombpnet_h5` | Import official ChromBPNet `counts_scores.h5` + `interpreted_regions.bed` computed elsewhere, checked row by row against the genome. `motifline merge-h5` stacks a sharded interpret run into one. |
+| `n_shards` | Split attribution into GPU shards, then merge the results. |
+| Neither `adopt_from` nor `n_shards` | Compute attributions in one process. |
+| `cancelled: true` | Exclude the run from default targets and freeze its `attr/`: it is never recomputed or re-adopted, and downstream stages can still be rebuilt from it by explicit target. |
+
 `motifline check` reports, in one pass: missing or misspelled keys (also inside
 `modisco:`, `finemo:` and the other sections), values of the wrong type, missing
 paths and invalid peak files. Relative paths resolve against the project directory.
+When the config passes, `check` (and `run`) also lists the parameters that differ from
+the defaults the installed tools print, read from `envs.compute`, so deliberate choices
+stay visible.
 
 ## 6. Does it work?
 
@@ -175,7 +194,9 @@ code; attribution stages also record the model checkouts, and the official Chrom
 stage the chrombpnet, tensorflow, kundajelab-shap and deeplift versions of its env.
 
 `motifline run` fixes the run's cards once: `--devices 0,2` (ids or UUIDs) if given,
-else `CUDA_VISIBLE_DEVICES` if set, else every card `nvidia-smi` lists. Each GPU step
+else `CUDA_VISIBLE_DEVICES` if set, else the UUID of every card `nvidia-smi` lists.
+Numeric ids are read in CUDA's order, which can differ from `nvidia-smi`'s on a machine
+with mixed cards; UUIDs are unambiguous. Each GPU step
 (attribution, its shards, FiNeMo call-hits) takes a free card from that set under a file
 lock in `.motifline/gpu_locks/` and runs with `CUDA_VISIBLE_DEVICES` set to it alone,
 so concurrent jobs use different cards and shards run in parallel. `--gpus N` caps

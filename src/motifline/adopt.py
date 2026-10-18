@@ -58,11 +58,10 @@ def normalize_peaks(src, dst) -> dict:
 
 
 def adopt_attr(src_dir, out_dir, expected_rows: int, expected_width: int | None = None,
-               peaks_name: str = "peaks.bed", attr_name: str = "attr.npy",
-               ohe_name: str = "ohe.npy") -> dict:
+               peaks_name: str = "peaks.bed") -> dict:
     """Link an archived attr/ohe pair into ``out_dir`` and normalize its peaks bed."""
     src, out = Path(src_dir), Path(out_dir)
-    attr_src, ohe_src = (src / attr_name).resolve(), (src / ohe_name).resolve()
+    attr_src, ohe_src = (src / "attr.npy").resolve(), (src / "ohe.npy").resolve()
     peaks_src = (src / peaks_name).resolve()
     for p in (attr_src, ohe_src, peaks_src):
         if not p.exists():
@@ -81,7 +80,7 @@ def adopt_attr(src_dir, out_dir, expected_rows: int, expected_width: int | None 
 
     out.mkdir(parents=True, exist_ok=True)
     bed_text = normalize_peaks_text(peaks_src)
-    for name, target in ((attr_name, attr_src), (ohe_name, ohe_src)):
+    for name, target in (("attr.npy", attr_src), ("ohe.npy", ohe_src)):
         link = out / name
         if link.is_symlink() or link.exists():
             link.unlink()

@@ -30,7 +30,8 @@ def blocks(path):
         elif line.startswith("letter-probability") and not re.search(r"\bE=", line):
             line = line.rstrip("\n") + " E= 0\n"
         if started:
-            out.append(line)
+            # a source without a trailing newline would fuse with the next MOTIF line
+            out.append(line if line.endswith("\n") else line + "\n")
     return out
 
 

@@ -118,17 +118,25 @@ def main():
         (out / f"{label}_query.meme").write_text(MEME_HEADER + "\n".join(blocks))
         print(f"{label}: {len(pats[label])} patterns", flush=True)
 
+    if not any(pats.values()):
+        raise SystemExit("modisco.h5 has no patterns: " + ", ".join(h5 for _, h5 in leaves))
+
     # TomTom always reruns: a cached result would be joined by pattern key to a
-    # modisco.h5 whose pattern_N may no longer be the same motif.
+    # modisco.h5 whose pattern_N may no longer be the same motif. A label without
+    # patterns has an empty query and no TomTom run.
     for label, _ in leaves:
         d = out / f"tomtom_{label}"
         if d.exists():
             shutil.rmtree(d)
+        if not pats[label]:
+            continue
         subprocess.run(tomtom_argv(a.tomtom, out / f"{label}_query.meme", a.target, d),
                        check=True)
 
     rows = []
     for label, _ in leaves:
+        if not pats[label]:
+            continue
         hits = _top(out / f"tomtom_{label}" / "tomtom.tsv")
         for r in pats[label]:
             h = hits.get(r["key"], [])

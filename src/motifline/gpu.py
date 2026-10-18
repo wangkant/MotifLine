@@ -27,7 +27,8 @@ def visible_devices() -> list[str]:
     smi = shutil.which("nvidia-smi")
     if smi is None:
         return []
-    p = subprocess.run([smi, "--query-gpu=index", "--format=csv,noheader"],
+    # UUIDs, not indices: nvidia-smi numbers cards in PCI bus order, CUDA by default does not
+    p = subprocess.run([smi, "--query-gpu=uuid", "--format=csv,noheader"],
                        capture_output=True, text=True)
     return parse(p.stdout.replace("\n", ",")) if p.returncode == 0 else []
 

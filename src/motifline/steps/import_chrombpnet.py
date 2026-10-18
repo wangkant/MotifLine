@@ -6,8 +6,8 @@ interpret step writes with deepdish, using PyTables: /raw/seq is the one-hot inp
 /shap/seq the hypothetical scores, both (N, 4, L). Rows follow
 `<prefix>.interpreted_regions.bed`.
 
-Before anything is written: /shap must be nonzero off the observed base (hypothetical,
-not projected), /projected_shap must equal raw * shap, and every row's one-hot must
+Before anything is written: /shap must be nonzero off the observed base in the first 256
+rows (hypothetical, not projected), /projected_shap must equal raw * shap in every row, and every row's one-hot must
 equal the genome at start + summit ± L/2. chrombpnet keeps peaks with N (all-zero columns); they are kept
 here too and counted. Scores are float16 in the file; attr.npy is float32.
 
@@ -68,8 +68,11 @@ def check(raw, shap, projected, rows, expected_rows, expected_width):
     if not (shap[:k][raw[:k] == 0] != 0).any():
         raise SystemExit("shap/seq is zero wherever a base is absent: these are projected "
                          "scores, not hypothetical ones")
-    if projected is not None and             not np.array_equal(projected[:k], (raw[:k] * shap[:k]).astype(projected.dtype)):
-        raise SystemExit("projected_shap is not raw * shap: the file is inconsistent")
+    for i in range(0, n if projected is not None else 0, 1024):
+        s = slice(i, i + 1024)
+        if not np.array_equal(projected[s], (raw[s] * shap[s]).astype(projected.dtype)):
+            raise SystemExit(f"projected_shap is not raw * shap from row {i}: "
+                             "the file is inconsistent")
 
 
 def main():

@@ -88,3 +88,24 @@ def test_a_non_empty_workdir_is_refused_before_anything_is_written(tmp_path):
         run_smoke(compute_env=str(tmp_path / "no_env"), workdir=str(tmp_path))
     assert sorted(tmp_path.iterdir()) == [keep] and keep.read_text() == "mine"
 
+
+
+def test_an_explicit_compute_env_is_named_as_the_source(tmp_path):
+    with pytest.raises(SystemExit, match="--compute-env must be"):
+        run_smoke(compute_env=str(tmp_path / "no_env"))
+
+
+def test_a_config_without_envs_compute_is_a_clear_exit(tmp_path, monkeypatch):
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "default.yaml").write_text("runs: {}\n")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit, match="sets no envs.compute"):
+        run_smoke()
+
+
+def test_envs_compute_from_the_config_is_named_as_the_source(tmp_path, monkeypatch):
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "default.yaml").write_text("envs: {compute: no_env}\n")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit, match="envs.compute in config/default.yaml must be"):
+        run_smoke()

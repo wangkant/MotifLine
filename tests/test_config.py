@@ -384,3 +384,16 @@ def test_an_alphagenome_run_does_not_need_the_pytorch_checkout():
                              "track": 60, "biosample": "K562", "chunk": 100}})
     del c["chrombpnet_src"]
     assert not only(problems(c, paths=False), "chrombpnet_src")
+
+
+def test_a_malformed_chrom_sizes_line_is_reported_not_raised(tmp_path):
+    for sizes in ("chrom\tsize\nchr1\t1000000\n", "chr1\n", "chr1\tbig\n"):
+        found = _peaks_cfg(tmp_path, ROW.format(summit=50), sizes=sizes)
+        assert only(found, "genome.chrom_sizes: line 1 is not <chrom> <int>"), sizes
+        assert not only(found, "is not in genome.chrom_sizes")
+
+
+def test_a_missing_lexicon_key_is_reported_without_quotes():
+    c = cfg_cbp()
+    del c["reference_lexicon"]["tomtom"]
+    assert "config.reference_lexicon is missing ['tomtom']" in problems(c, paths=False)
