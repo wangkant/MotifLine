@@ -150,7 +150,7 @@ not covered.
 
 ```bash
 motifline run -n
-motifline run -j 8 --gpus 1
+motifline run -j 8
 motifline run results/<run>/hits/hits.tsv -j 4
 motifline run -j 8 -- --rerun-incomplete      # anything after -- goes to snakemake
 ```
@@ -164,9 +164,14 @@ code it ran: the commit of a git checkout, or a digest of the installed package'
 code; attribution stages also record the model checkouts, and the official ChromBPNet
 stage the chrombpnet, tensorflow, kundajelab-shap and deeplift versions of its env.
 
-Every GPU step uses the first visible device. `--gpus N` only limits how many GPU
-jobs run at once, so with N > 1 they share that device. Set `CUDA_VISIBLE_DEVICES`
-to the card you want.
+`motifline run` fixes the run's cards once: `--devices 0,2` (ids or UUIDs) if given,
+else `CUDA_VISIBLE_DEVICES` if set, else every card `nvidia-smi` lists. Each GPU step
+(attribution, its shards, FiNeMo call-hits) takes a free card from that set under a file
+lock in `.motifline/gpu_locks/` and runs with `CUDA_VISIBLE_DEVICES` set to it alone,
+so concurrent jobs use different cards and shards run in parallel. `--gpus N` caps
+concurrent GPU jobs (default: the number of cards); a job that finds every card taken
+waits. The card a stage ran on is recorded as `device` in its `run_info.json`. Running
+snakemake directly, without `motifline run`, leaves the device choice to the environment.
 
 ## Reproducing the exact environment
 

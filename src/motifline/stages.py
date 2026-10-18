@@ -19,7 +19,7 @@ STAGE_LOG = "stage.log"
 def run_body(out_dir, argv, *, stage: str, param_sig: str | None = None,
              env: dict | None = None, env_prefix: str | None = None,
              packages: tuple[str, ...] = PACKAGES, checks=(),
-             code: dict | None = None) -> Path:
+             code: dict | None = None, device: str | None = None) -> Path:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / RUN_INFO).unlink(missing_ok=True)
@@ -50,4 +50,4 @@ def run_body(out_dir, argv, *, stage: str, param_sig: str | None = None,
 
     return record(out_dir, stage=stage, argv=argv, param_sig=param_sig,
                   started=started, env_prefix=env_prefix, packages=packages,
-                  checks=results or None, code=code)
+                  checks=results or None, code=code, device=device)

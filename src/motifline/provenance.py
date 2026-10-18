@@ -66,7 +66,7 @@ def code_entries(code: dict) -> dict:
 def record(out_dir, *, stage: str, argv, param_sig: str | None = None,
            started: str | None = None, env_prefix: str | None = None,
            packages: tuple[str, ...] = PACKAGES, checks: dict | None = None,
-           code: dict | None = None) -> Path:
+           code: dict | None = None, device: str | None = None) -> Path:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     finished = now()
@@ -81,6 +81,7 @@ def record(out_dir, *, stage: str, argv, param_sig: str | None = None,
         "tools": tool_versions(env_prefix, tuple(packages)) if env_prefix else None,
         "code": code_entries(code) if code else None,
         "checks": checks,
+        "device": device,
         "host": platform.node(),
         "orchestrator_python": sys.version.split()[0],
     }

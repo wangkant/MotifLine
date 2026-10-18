@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from motifline import __version__
+from motifline import __version__, gpu
 from motifline.config import ConfigError, check as check_config, load, problems, skeleton
 from motifline.tools import TOOLS, deviations, live_defaults, render_deviations
 
@@ -146,11 +146,15 @@ def cmd_run(args) -> int:
         return 1
     for line in deviation_lines(load(configfile)):
         print(line, file=sys.stderr)
+    devices = gpu.pool(args.devices)
+    gpus = args.gpus if args.gpus is not None else (len(devices) or None)
+    print(f"GPU devices: {','.join(devices) or 'none (GPU stages see the caller environment)'}; "
+          f"concurrent GPU jobs: {gpus if gpus is not None else 'unlimited'}", file=sys.stderr)
     argv = snakemake_argv(args.targets, snakefile=SNAKEFILE, directory=project,
-                          jobs=args.jobs, gpus=args.gpus, dry_run=args.dry_run,
+                          jobs=args.jobs, gpus=gpus, dry_run=args.dry_run,
                           configfile=configfile, extra=args.extra)
     print(" ".join(argv), file=sys.stderr)
-    return subprocess.run(argv).returncode
+    return subprocess.run(argv, env={**os.environ, gpu.POOL_VAR: ",".join(devices)}).returncode
 
 
 def cmd_smoke(args) -> int:
@@ -206,7 +210,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("-c", "--config", default=None)
     run.add_argument("-j", "--jobs", type=int, default=None)
     run.add_argument("--gpus", type=int, default=None,
-                     help="concurrent GPU jobs; export CUDA_VISIBLE_DEVICES yourself")
+                     help="concurrent GPU jobs (default: one per device)")
+    run.add_argument("--devices", default=None,
+                     help="comma-separated GPU ids or UUIDs the run may use (default: "
+                          "CUDA_VISIBLE_DEVICES if set, else every card nvidia-smi lists); "
+                          "each GPU job gets one free card of these")
     run.add_argument("-n", "--dry-run", action="store_true")
     run.add_argument("--no-check", action="store_true",
                      help="skip the path checks before building the DAG")

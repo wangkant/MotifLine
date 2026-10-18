@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 from snakemake.exceptions import WorkflowError
 
-from motifline import naming as nm
+from motifline import gpu, naming as nm
 from motifline.attribution import hyp_check
 from motifline.config import attr_inputs as attr_input_paths, missing_attr_inputs
 from motifline.config import check as check_config
@@ -58,12 +58,21 @@ def sig_naming(w=None):
                      qval_threshold=lex["qval_threshold"])
 
 
+# stages that need a GPU; each claims one card of the run's pool (motifline.gpu)
+GPU_STAGES = {"attribute", "attribute_sharded", "call_hits"}
+
+
 def run_body(out_dir, argv, stage, env=None, prefix=None, sig=None, checks=(), code=None,
              packages=PACKAGES):
     code = {"motifline": workflow.basedir, **(code or {})}
-    return _run_body(out_dir, argv, stage=stage, param_sig=sig, env=env,
-                     env_prefix=ENV if prefix is None else prefix, packages=packages,
-                     checks=checks, code=code)
+    kw = dict(stage=stage, param_sig=sig, env_prefix=ENV if prefix is None else prefix,
+              packages=packages, checks=checks, code=code)
+    devices = gpu.parse(os.environ.get(gpu.POOL_VAR, ""))
+    if stage not in GPU_STAGES or not devices:
+        return _run_body(out_dir, argv, env=env, **kw)
+    with gpu.claim(devices) as dev:
+        return _run_body(out_dir, argv, env={**(env or {}), "CUDA_VISIBLE_DEVICES": dev},
+                         device=dev, **kw)
 
 
 def thread_env(n):

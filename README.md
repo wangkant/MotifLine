@@ -114,11 +114,13 @@ $EDITOR config/default.yaml    # set paths, model weights, and runs
 motifline check                # validate configuration and input paths
 motifline smoke                # check motif discovery and hit calling on CPU
 motifline run -n               # preview the workflow
-motifline run -j 8 --gpus 1     # up to 8 jobs, one GPU job at a time
+motifline run -j 8               # up to 8 jobs, one GPU job per visible card
 ```
 
-GPU steps use the first visible device; choose it with `CUDA_VISIBLE_DEVICES`.
-`--gpus` only limits concurrent GPU jobs. Arguments after `--` go to snakemake.
+Each GPU step claims one free card and sees only that card. The cards are
+`--devices` if given, else `CUDA_VISIBLE_DEVICES`, else every card `nvidia-smi` lists.
+`--gpus` caps concurrent GPU jobs (default: one per card); jobs beyond the free cards
+wait. Arguments after `--` go to snakemake.
 You can also request a specific output:
 
 ```bash
