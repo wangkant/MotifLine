@@ -20,7 +20,8 @@ dependencies:
       - modisco-lite==2.4.0
       # FiNeMo 0.30 has no PyPI release
       - finemo @ git+https://github.com/austintwang/finemo_gpu.git@5c6f521c773f61f50307ff7cc59682073a56a65a
-      # imported by chrombpnet-pytorch and alphagenome-pytorch
+      # lightning and pooch were for the removed ChromBPNet PyTorch port; pyBigWig, tqdm and
+      # safetensors are imported by alphagenome-pytorch
       - lightning==2.6.1
       - pooch==1.9.0
       - pyBigWig==0.3.25
