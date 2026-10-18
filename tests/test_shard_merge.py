@@ -19,16 +19,18 @@ def _load(name):
     return mod
 
 
-def test_bounds_partition_the_rows_contiguously():
-    b = _load("attr_ag").shard_bounds(33917, 4)
+@pytest.mark.parametrize("step", ["attr_cbp", "attr_ag"])
+def test_bounds_partition_the_rows_contiguously(step):
+    b = _load(step).shard_bounds(33917, 4)
     assert list(b) == [0, 8479, 16958, 25437, 33917]
     assert b[0] == 0 and b[-1] == 33917
     assert all(b[i] <= b[i + 1] for i in range(len(b) - 1))
 
 
-def test_bounds_are_the_archive_formula():
+@pytest.mark.parametrize("step", ["attr_cbp", "attr_ag"])
+def test_bounds_are_the_archive_formula(step):
     for n_rows, k in [(7, 2), (33917, 6), (200, 3), (5, 5)]:
-        assert list(_load("attr_ag").shard_bounds(n_rows, k)) == \
+        assert list(_load(step).shard_bounds(n_rows, k)) == \
             list(np.linspace(0, n_rows, k + 1).astype(int))
 
 
@@ -70,18 +72,22 @@ def test_merge_refuses_row_count_disagreement(tmp_path):
         merge_shards([tmp_path / "s0"], tmp_path / "merged")
 
 
-def test_head_and_shard_are_mutually_exclusive():
-    argv = [sys.executable, str(STEPS / "attr_ag.py"), "--peaks", "p", "--out_dir", "o",
+@pytest.mark.parametrize("step", ["attr_cbp", "attr_ag"])
+def test_head_and_shard_are_mutually_exclusive(step):
+    argv = [sys.executable, str(STEPS / f"{step}.py"), "--peaks", "p", "--out_dir", "o",
             "--fasta", "f", "--chrom_sizes", "c",
-            "--hypothetical", "--head", "10", "--shard_i", "0", "--n_shards", "4"] + AG_ARGS
+            "--hypothetical", "--head", "10", "--shard_i", "0", "--n_shards", "4"]
+    argv += ["--wo_bias", "m", "--chrombpnet_src", "s"] if step == "attr_cbp" else AG_ARGS
     r = subprocess.run(argv, capture_output=True, text=True)
     assert r.returncode != 0 and "mutually exclusive" in r.stderr
 
 
-def test_shard_args_must_come_in_pairs():
-    argv = [sys.executable, str(STEPS / "attr_ag.py"), "--peaks", "p", "--out_dir", "o",
+@pytest.mark.parametrize("step", ["attr_cbp", "attr_ag"])
+def test_shard_args_must_come_in_pairs(step):
+    argv = [sys.executable, str(STEPS / f"{step}.py"), "--peaks", "p", "--out_dir", "o",
             "--fasta", "f", "--chrom_sizes", "c",
-            "--hypothetical", "--shard_i", "0"] + AG_ARGS
+            "--hypothetical", "--shard_i", "0"]
+    argv += ["--wo_bias", "m", "--chrombpnet_src", "s"] if step == "attr_cbp" else AG_ARGS
     r = subprocess.run(argv, capture_output=True, text=True)
     assert r.returncode != 0 and "must be given together" in r.stderr
 

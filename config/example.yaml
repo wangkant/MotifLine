@@ -1,6 +1,7 @@
 envs:
   compute: /path/to/envs/compute
   chrombpnet: /path/to/envs/chrombpnet
+chrombpnet_src: /path/to/chrombpnet-pytorch
 genome:
   fasta: /path/to/hg38.fa
   chrom_sizes: /path/to/hg38.chrom.sizes
@@ -11,13 +12,20 @@ attribution:
   random_state: 42
 
 runs:
-  # ChromBPNet with the official TensorFlow code, split into
+  # ChromBPNet with the official TensorFlow code (backend tf, the default), split into
   # 4 GPU shards and merged. wo_bias is the Keras model chrombpnet trains without bias.
   k562_cbp:
     model: cbp
     wo_bias: /path/to/chrombpnet_nobias.h5
     peaks: config/peaks/k562_allpeaks_33917.bed
     n_shards: 4
+
+  # Fallback: ChromBPNet with the PyTorch port, a state dict for chrombpnet-pytorch's BPNet.
+  k562_cbp_torch:
+    model: cbp
+    backend: pytorch
+    wo_bias: /path/to/k562_chrombpnet_wo_bias.pt
+    peaks: config/peaks/k562_allpeaks_33917.bed
 
   # AlphaGenome. `track` indexes the ATAC head; `biosample` must match that track's
   # biosample_name in AlphaGenome's metadata or the step refuses to run.

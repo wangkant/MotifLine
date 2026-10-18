@@ -15,12 +15,16 @@ from motifline import naming as nm
 
 MODELS = ("cbp", "ag")
 
+# ChromBPNet attribution: the official TensorFlow code (envs.chrombpnet), the default, or
+# the PyTorch port as a fallback (backend: pytorch; chrombpnet_src, in envs.compute)
+CBP_BACKENDS = ("tf", "pytorch")
+
 COMMON_KEYS = {"model", "head", "n_shards", "rows", "in_window",
                "cancelled", "cancelled_note", "notes"}
 
 # per model: keys a computed run must declare, and keys it may
 MODEL_KEYS = {
-    "cbp": (("wo_bias", "peaks"), {"n_shuffles", "random_state"}),
+    "cbp": (("wo_bias", "peaks"), {"backend", "n_shuffles", "random_state"}),
     "ag": (("ag_src", "weights", "peaks", "track", "biosample", "chunk"),
            {"crop", "n_shuffles", "random_state"}),
 }
@@ -31,7 +35,7 @@ ADOPTED_OPTIONAL = {"adopt_peaks", "crop", "adopt_format", "adopt_scores"}
 # npy: attr.npy + ohe.npy + a peaks bed; chrombpnet_h5: official ChromBPNet interpret output
 ADOPT_FORMATS = ("npy", "chrombpnet_h5")
 
-TOP_LEVEL_KEYS = {"envs", "genome", "attribution",
+TOP_LEVEL_KEYS = {"envs", "chrombpnet_src", "genome", "attribution",
                   "modisco", "finemo", "reference_lexicon", "runs"}
 
 SECTION_KEYS = {
@@ -102,6 +106,11 @@ def _run_name_ok(name) -> bool:
             and not any(c in name for c in "/=") and not any(c.isspace() for c in name))
 
 
+def tf_cbp(r: dict) -> bool:
+    """A ChromBPNet run computed with the official TensorFlow code (backend tf, the default)."""
+    return r.get("model") == "cbp" and r.get("backend", "tf") == "tf"
+
+
 def _computed(runs: dict) -> list[dict]:
     return [r for r in runs.values() if isinstance(r, dict) and not r.get("adopt_from")
             and r.get("model") in MODELS]
@@ -139,8 +148,10 @@ def _structure(cfg: dict, runs: dict) -> list[str]:
         out += _require(cfg, "genome.fasta") + _require(cfg, "genome.chrom_sizes")
         out += _require(cfg, "attribution.n_shuffles")
         out += _require(cfg, "attribution.random_state")
-    if any(r["model"] == "cbp" for r in computed):
+    if any(tf_cbp(r) for r in computed):
         out += _require(cfg, "envs.chrombpnet")
+    if any(r["model"] == "cbp" and not tf_cbp(r) for r in computed):
+        out += _require(cfg, "chrombpnet_src")  # the PyTorch port
     win = (cfg.get("modisco") or {}).get("window")
     if win is not None and not (isinstance(win, int) and win > 0):
         out.append(f"modisco.window: must be a positive integer, not {win!r}")
@@ -186,6 +197,8 @@ def _run_structure(name: str, r) -> list[str]:
     if track is not None and not (isinstance(track, int) and not isinstance(track, bool)
                                   and track >= 0):
         out.append(f"runs.{name}.track: must be a non-negative integer, not {track!r}")
+    if "backend" in r and r["backend"] not in CBP_BACKENDS:
+        out.append(f"runs.{name}.backend: {r['backend']!r} is not one of {list(CBP_BACKENDS)}")
     fmt = r.get("adopt_format", "npy")
     if fmt not in ADOPT_FORMATS:
         out.append(f"runs.{name}.adopt_format: {fmt!r} is not one of {list(ADOPT_FORMATS)}")
@@ -300,6 +313,7 @@ def _paths(cfg: dict, runs: dict, base: Path) -> list[str]:
     if cbp_env and _resolve(base, cbp_env).is_dir():
         out += _exists(base, "envs.chrombpnet/bin/python",
                        _resolve(base, cbp_env) / "bin" / "python", kind="exe")
+    out += _exists(base, "chrombpnet_src", cfg.get("chrombpnet_src"), kind="dir")
     genome = cfg.get("genome") or {}
     out += _exists(base, "genome.fasta", genome.get("fasta"))
     out += _exists(base, "genome.chrom_sizes", genome.get("chrom_sizes"))
@@ -337,7 +351,7 @@ def attr_inputs(cfg: dict, r: dict) -> list[str]:
     The official ChromBPNet code reads no chrom sizes."""
     model_file = r["wo_bias"] if r["model"] == "cbp" else r["weights"]
     files = [model_file, r["peaks"], cfg["genome"]["fasta"]]
-    return files if r["model"] == "cbp" else files + [cfg["genome"]["chrom_sizes"]]
+    return files if tf_cbp(r) else files + [cfg["genome"]["chrom_sizes"]]
 
 
 def missing_attr_inputs(cfg: dict, base=".") -> list[str]:

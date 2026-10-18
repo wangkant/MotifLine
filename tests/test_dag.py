@@ -20,6 +20,7 @@ def _config(tmp_path):
     archive.mkdir()
     return {
         "envs": {"compute": str(tmp_path / "env"), "chrombpnet": str(tmp_path / "tf_env")},
+        "chrombpnet_src": str(tmp_path / "cbp_src"),
         "genome": {"fasta": f("hg38.fa"), "chrom_sizes": f("hg38.chrom.sizes")},
         "attribution": {"n_shuffles": 20, "random_state": 42},
         "modisco": {"max_seqlets": 1000000, "window": 400, "n_leiden": 50},
@@ -31,6 +32,8 @@ def _config(tmp_path):
             "single": {"model": "cbp", "wo_bias": f("m.h5"), "peaks": f("p.bed")},
             "sharded": {"model": "cbp", "wo_bias": f("m.h5"), "peaks": f("p.bed"),
                         "n_shards": 3},
+            "torch": {"model": "cbp", "backend": "pytorch", "wo_bias": f("m.pt"),
+                      "peaks": f("p.bed"), "n_shards": 2},
             "ag": {"model": "ag", "ag_src": str(tmp_path / "ag_src"), "weights": f("w.st"),
                    "peaks": f("p.bed"), "track": 60, "biosample": "K562", "chunk": 100},
             "adopted": {"model": "cbp", "adopt_from": str(archive), "rows": 10},

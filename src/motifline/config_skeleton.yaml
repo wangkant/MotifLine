@@ -5,6 +5,9 @@ envs:
   compute: /path/to/envs/compute        # built from envs/compute.yaml
   chrombpnet: /path/to/envs/chrombpnet  # built from envs/chrombpnet.yaml; official ChromBPNet
 
+# Only for ChromBPNet runs with backend: pytorch, the fallback to the official code
+# chrombpnet_src: /path/to/chrombpnet-pytorch
+
 genome:
   fasta: /path/to/hg38.fa
   chrom_sizes: /path/to/hg38.chrom.sizes
