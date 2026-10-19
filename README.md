@@ -66,7 +66,6 @@ contribution scores; `ohe.npy`; `regions.bed`, the row key), `modisco/modisco.h5
 One K562 accessible region from the example peak set: per-base contributions from
 ChromBPNet and AlphaGenome (letter height = contribution), with the FiNeMo motif hits
 each model's run called there, labelled by motif family (curated from TomTom matches).
-The two models explain different outputs, so compare positions, not heights.
 
 ## Citation
 
