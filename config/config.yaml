@@ -1,5 +1,5 @@
 envs:
-  compute: /path/to/envs/compute
+  compute: /path/to/conda/envs/motifline-compute
 genome:
   fasta: /path/to/hg38.fa
   chrom_sizes: /path/to/hg38.chrom.sizes
@@ -39,5 +39,5 @@ reference_lexicon:
     - /path/to/hocomoco14_core.meme
     - /path/to/jaspar2026_core_vert_nr.meme
   h14_annotation: /path/to/H14CORE_annotation.jsonl
-  tomtom: /path/to/envs/meme/bin/tomtom
+  tomtom: /path/to/conda/envs/motifline-meme/bin/tomtom
   qval_threshold: 0.05
