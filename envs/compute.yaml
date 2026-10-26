@@ -13,6 +13,8 @@ dependencies:
       - pyfaidx==0.9.0.4
       - tangermeme==1.0.4
       - modisco-lite==2.4.0
+      # polars 2 refuses the 11th column of regions.bed
+      - polars==1.41.2
       - finemo @ git+https://github.com/austintwang/finemo_gpu.git@5c6f521c773f61f50307ff7cc59682073a56a65a
       # alphagenome-pytorch
       - pyBigWig==0.3.25
