@@ -7,7 +7,6 @@ dinucleotide shuffles, batch size 1, seeded by random_state + shuffle index.
 import argparse
 import hashlib
 import os
-import sys
 
 import numpy as np
 import pandas as pd
@@ -15,7 +14,7 @@ import pyfaidx
 import torch
 
 ap = argparse.ArgumentParser()
-for k in ("ag_src", "weights", "peaks", "fasta", "chrom_sizes", "out_dir"):
+for k in ("weights", "peaks", "fasta", "chrom_sizes", "out_dir"):
     ap.add_argument(f"--{k}", required=True)
 ap.add_argument("--track", type=int, required=True, help="index into the ATAC head")
 ap.add_argument("--shard_i", type=int, default=0)
@@ -26,7 +25,6 @@ ap.add_argument("--random_state", type=int, default=42)
 ap.add_argument("--chunk", type=int, default=100, help="peaks per checkpoint")
 a = ap.parse_args()
 
-sys.path.insert(0, a.ag_src)
 from alphagenome_pytorch import AlphaGenome
 from alphagenome_pytorch.attribution import deeplift
 from alphagenome_pytorch.utils.sequence import sequence_to_onehot_tensor

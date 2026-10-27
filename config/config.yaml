@@ -1,8 +1,8 @@
 envs:
-  compute: /path/to/conda/envs/motifline-compute
+  compute: .envs/compute
 genome:
-  fasta: /path/to/hg38.fa
-  chrom_sizes: /path/to/hg38.chrom.sizes
+  fasta: data/hg38.fa
+  chrom_sizes: data/hg38.chrom.sizes
 # shard i runs on gpus[i % len(gpus)]; FiNeMo on gpus[0]
 gpus: [0, 1, 2, 3]
 
@@ -13,15 +13,15 @@ attribution:
 runs:
   k562_cbp:
     model: cbp
-    wo_bias: /path/to/k562_chrombpnet_nobias.h5
+    wo_bias: weights/k562_chrombpnet_nobias.h5
     peaks: config/peaks/k562_allpeaks_33917.bed
     n_shards: 4
   k562_ag:
     model: ag
-    ag_src: /path/to/alphagenome-pytorch/src
-    weights: /path/to/alphagenome_weights.safetensors
+    weights: data/alphagenome_model_fold_0.safetensors
     peaks: config/peaks/k562_allpeaks_33917.bed
     track: 60           # K562 ATAC
+    in_window: 2048     # model input in bp, a multiple of 2048
     n_shards: 4
 
 modisco:
@@ -36,8 +36,14 @@ finemo:
 
 reference_lexicon:
   sources:
-    - /path/to/hocomoco14_core.meme
-    - /path/to/jaspar2026_core_vert_nr.meme
-  h14_annotation: /path/to/H14CORE_annotation.jsonl
-  tomtom: /path/to/conda/envs/motifline-meme/bin/tomtom
+    - data/H14CORE_meme_format.meme
+    - data/JASPAR2026_CORE_vertebrates_non-redundant_pfms_meme.txt
+  h14_annotation: data/H14CORE_annotation.jsonl
+  tomtom: .envs/meme/bin/tomtom
   qval_threshold: 0.05
+
+# drawn last: each run's contributions over the region, its FiNeMo hits shaded and named
+plots:
+  example:
+    region: chr15:77228858-77229158
+    runs: [k562_cbp, k562_ag]

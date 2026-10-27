@@ -1,0 +1,166 @@
+cff-version: 1.2.0
+message: >-
+  If you use MotifLine, please cite it as below, together with the methods and
+  databases it relies on.
+type: software
+title: "MotifLine: a Snakemake workflow for motif discovery, hit calling and annotation from ChromBPNet and AlphaGenome attributions"
+abstract: >-
+  MotifLine computes DeepLIFT/SHAP attributions with ChromBPNet or AlphaGenome,
+  discovers motifs with TF-MoDISco, calls motif instances with FiNeMo, and annotates
+  the discovered patterns by TomTom comparison against HOCOMOCO H14 and JASPAR 2026.
+  Both models share every stage after attribution.
+authors:
+  - family-names: Wang
+    given-names: Qiankang
+    alias: wangkant
+version: 0.1.0
+date-released: 2026-10-27
+license: MIT
+repository-code: "https://github.com/wangkant/MotifLine"
+keywords:
+  - regulatory genomics
+  - chromatin accessibility
+  - transcription factor motifs
+  - deep learning interpretation
+  - ChromBPNet
+  - AlphaGenome
+  - TF-MoDISco
+  - Snakemake
+references:
+  - type: article
+    title: "ChromBPNet: bias factorized, base-resolution deep learning models of chromatin accessibility reveal cis-regulatory sequence syntax, transcription factor footprints and regulatory variants"
+    authors:
+      - family-names: Pampari
+        given-names: Anusri
+      - name: "et al."
+    journal: bioRxiv
+    year: 2024
+    doi: 10.1101/2024.12.25.630221
+  - type: article
+    title: "Advancing regulatory variant effect prediction with AlphaGenome"
+    authors:
+      - family-names: Avsec
+        given-names: Žiga
+      - name: "et al."
+    journal: Nature
+    volume: 649
+    issue: "8099"
+    start: 1206
+    end: 1218
+    year: 2026
+    doi: 10.1038/s41586-025-10014-0
+  - type: conference-paper
+    title: "Learning important features through propagating activation differences"
+    authors:
+      - family-names: Shrikumar
+        given-names: Avanti
+      - family-names: Greenside
+        given-names: Peyton
+      - family-names: Kundaje
+        given-names: Anshul
+    collection-title: "Proceedings of the 34th International Conference on Machine Learning"
+    volume: 70
+    start: 3145
+    end: 3153
+    year: 2017
+    url: "https://proceedings.mlr.press/v70/shrikumar17a.html"
+  - type: article
+    title: "Tangermeme: a toolkit for understanding cis-regulatory logic using deep learning models"
+    authors:
+      - family-names: Schreiber
+        given-names: Jacob
+    journal: Nature Methods
+    year: 2026
+    doi: 10.1038/s41592-026-03254-z
+  - type: report
+    title: "Technical note on transcription factor motif discovery from importance scores (TF-MoDISco) version 0.5.6.5"
+    authors:
+      - family-names: Shrikumar
+        given-names: Avanti
+      - name: "et al."
+    year: 2018
+    identifiers:
+      - type: other
+        value: "arXiv:1811.00416"
+    url: "https://arxiv.org/abs/1811.00416"
+  - type: software
+    title: FiNeMo
+    authors:
+      - family-names: Wang
+        given-names: Austin
+      - family-names: Kundaje
+        given-names: Anshul
+    version: "0.30"
+    repository-code: "https://github.com/austintwang/finemo_gpu"
+  - type: article
+    title: "Quantifying similarity between motifs"
+    authors:
+      - family-names: Gupta
+        given-names: Shobhit
+      - family-names: Stamatoyannopoulos
+        given-names: John A.
+      - family-names: Bailey
+        given-names: Timothy L.
+      - family-names: Noble
+        given-names: William Stafford
+    journal: Genome Biology
+    volume: 8
+    issue: "2"
+    start: R24
+    year: 2007
+    doi: 10.1186/gb-2007-8-2-r24
+  - type: article
+    title: "The MEME Suite"
+    authors:
+      - family-names: Bailey
+        given-names: Timothy L.
+      - family-names: Johnson
+        given-names: James
+      - family-names: Grant
+        given-names: Charles E.
+      - family-names: Noble
+        given-names: William S.
+    journal: Nucleic Acids Research
+    volume: 43
+    issue: W1
+    start: W39
+    end: W49
+    year: 2015
+    doi: 10.1093/nar/gkv416
+  - type: article
+    title: "HOCOMOCO in 2024: a rebuild of the curated collection of binding models for human and mouse transcription factors"
+    authors:
+      - family-names: Vorontsov
+        given-names: Ilya E.
+      - name: "et al."
+    journal: Nucleic Acids Research
+    volume: 52
+    issue: D1
+    start: D154
+    end: D163
+    year: 2024
+    doi: 10.1093/nar/gkad1077
+  - type: article
+    title: "JASPAR 2026: expansion of transcription factor binding profiles and integration of deep learning models"
+    authors:
+      - family-names: Ovek Baydar
+        given-names: Damla
+      - name: "et al."
+    journal: Nucleic Acids Research
+    volume: 54
+    issue: D1
+    start: D184
+    end: D193
+    year: 2026
+    doi: 10.1093/nar/gkaf1209
+  - type: article
+    title: "Sustainable data analysis with Snakemake"
+    authors:
+      - family-names: Mölder
+        given-names: Felix
+      - name: "et al."
+    journal: F1000Research
+    volume: 10
+    start: 33
+    year: 2021
+    doi: 10.12688/f1000research.29032.2

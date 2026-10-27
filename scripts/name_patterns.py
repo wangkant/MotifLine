@@ -2,7 +2,8 @@
 """Name MoDISco patterns by TomTom against the reference union.
 
 Each pattern is trimmed as in modiscolite's report (|CWM| >= 30% of max) and named after
-the gene symbol of its best match (lowest q, then p); `confident` is q <= qval_threshold.
+the gene symbol of its best match (lowest q, then p); `family` is that TF's TFClass family
+from the H14 annotation; `confident` is q <= qval_threshold.
 """
 import argparse
 import json
@@ -48,10 +49,11 @@ subprocess.run([a.tomtom, "-no-ssc", "-oc", f"{a.out_dir}/tomtom", "-verbosity",
                 query, a.target], check=True)
 
 # HOCOMOCO ids go through the H14 annotation; JASPAR ids keep the name after '_'
-h14 = {}
+h14, family = {}, {}
 for line in filter(str.strip, open(a.h14_annotation)):
     r = json.loads(line)
     h14[r["name"]] = r["masterlist_info"]["species"]["HUMAN"]["gene_symbol"]
+    family[h14[r["name"]]] = r["masterlist_info"]["tfclass_family"]
 
 
 def symbol(motif_id):
@@ -71,6 +73,8 @@ for p in pats:
         rec[f"tf{i}"] = symbol(h.Target_ID)
         rec[f"qval{i}"] = h.q_value
     rec["name"] = rec.get("tf0", "")
+    # TFClass family of the best match; JASPAR dimers such as FOS::JUN keep their name
+    rec["family"] = family.get(rec["name"], rec["name"])
     rec["confident"] = rec.get("qval0", np.nan) <= a.qval_threshold
     rows.append(rec)
 pd.DataFrame(rows).to_csv(f"{a.out_dir}/pattern_names.tsv", sep="\t", index=False)

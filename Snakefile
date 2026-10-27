@@ -21,8 +21,8 @@ def shards(run):
 
 
 def width(run):
-    # what the attribution step stores: ChromBPNet's 2114 bp input, AlphaGenome's 2048
-    return 2048 if RUNS[run]["model"] == "ag" else 2114
+    # the attribution step stores the whole input: ChromBPNet's 2114 bp, AlphaGenome's in_window
+    return RUNS[run].get("in_window", 2048) if RUNS[run]["model"] == "ag" else 2114
 
 
 def attr_cmd(w):
@@ -33,13 +33,12 @@ def attr_cmd(w):
               f"--shard_i {w.i} --n_shards {len(shards(w.run))} "
               f"--n_shuffles {a['n_shuffles']} --random_state {a['random_state']}")
     if r["model"] == "ag":
-        return (f"{PY} {S}/attr_ag.py --ag_src {r['ag_src']} --weights {r['weights']} "
-                f"--track {r['track']} {common}")
+        return (f"{PY} {S}/attr_ag.py --weights {r['weights']} "
+                f"--track {r['track']} --in_window {r.get('in_window', 2048)} {common}")
     if r.get("backend") == "tf":
         return (f"TF_FORCE_GPU_ALLOW_GROWTH=true {config['envs']['chrombpnet']}/bin/python "
                 f"{S}/attr_cbp_tf.py --model_h5 {r['wo_bias']} {common}")
-    return (f"{PY} {S}/attr_cbp.py "
-            f"--wo_bias {r['wo_bias']} {common}")
+    return (f"{PY} {S}/attr_cbp.py --wo_bias {r['wo_bias']} {common}")
 
 
 rule all:
@@ -47,7 +46,8 @@ rule all:
         expand("results/{run}/hits/hits.tsv", run=RUNS),
         expand("results/{run}/naming/pattern_names.tsv", run=RUNS),
         expand("results/{run}/modisco_report/motifs.html", run=RUNS),
-        expand("results/{run}/finemo_report/report.html", run=RUNS)
+        expand("results/{run}/finemo_report/report.html", run=RUNS),
+        expand("results/plots/{plot}.png", plot=config["plots"])
 
 
 rule attribute:
@@ -139,3 +139,18 @@ rule name_patterns:
         "{PY} {S}/name_patterns.py --h5 {input.h5} --target {input.lex} "
         "--h14_annotation {input.h14} --tomtom {LEX[tomtom]} "
         "--qval_threshold {LEX[qval_threshold]} --out_dir {params.out}"
+
+
+MODEL = {"cbp": "ChromBPNet", "ag": "AlphaGenome"}
+
+
+rule plot_region:
+    input:
+        lambda w: expand("results/{run}/{f}", run=config["plots"][w.plot]["runs"],
+                         f=("attr/attr.npy", "hits/hits.tsv", "naming/pattern_names.tsv"))
+    output: "results/plots/{plot}.png"
+    params:
+        region=lambda w: config["plots"][w.plot]["region"],
+        runs=lambda w: " ".join(f"--run '{MODEL[RUNS[r]['model']]} ({r})=results/{r}'"
+                                for r in config["plots"][w.plot]["runs"])
+    shell: "{PY} {S}/plot_region.py --region {params.region} {params.runs} --out {output}"
