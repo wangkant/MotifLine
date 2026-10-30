@@ -1,10 +1,11 @@
 # chrombpnet 1.0.1 pins TensorFlow 2.8, built against CUDA 11.2 / cuDNN 8.1
 name: motifline-chrombpnet
-channels: [conda-forge]
+channels: [conda-forge, bioconda]
 dependencies:
   - python=3.8
   - cudatoolkit=11.2
   - cudnn=8.1
+  - pybigwig=0.3.22   # imported by chrombpnet, not declared by it
   - pip
   - pip:
       - chrombpnet==1.0.1

@@ -1,5 +1,6 @@
 envs:
   compute: .envs/compute
+  chrombpnet: .envs/chrombpnet    # the official ChromBPNet code, for backend: tf
 genome:
   fasta: data/hg38.fa
   chrom_sizes: data/hg38.chrom.sizes
@@ -14,6 +15,7 @@ runs:
   k562_cbp:
     model: cbp
     wo_bias: weights/k562_chrombpnet_nobias.h5
+    # backend: tf     # the official ChromBPNet TensorFlow code instead
     peaks: config/peaks/k562_allpeaks_33917.bed
     n_shards: 4
   k562_ag:

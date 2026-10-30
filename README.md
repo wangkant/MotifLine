@@ -10,7 +10,8 @@ after attribution.
 ```text
 peaks + model + genome
   -> attribute    ChromBPNet: counts head, 2,114 bp input,
-                  dinucleotide-shuffled references
+                  dinucleotide-shuffled references;
+                  `backend: tf` runs the official ChromBPNet code instead
                   AlphaGenome: log1p of the ATAC track summed over the central 1,000 bp,
                   `in_window` bp input (2,048 by default),
                   local dinucleotide-shuffled references
@@ -36,6 +37,7 @@ ChromBPNet model, which ships with the repository.
 | | what | source |
 |---|---|---|
 | ChromBPNet | K562 model without its bias model, Keras h5 | `weights/` in this repository |
+| ChromBPNet, `backend: tf` | the official code and its DeepSHAP, chrombpnet 1.0.1 on TensorFlow 2.8 | [kundajelab/chrombpnet](https://github.com/kundajelab/chrombpnet) |
 | AlphaGenome | model code with DeepLIFT rules, `64e9b75` on branch `deeplift-support` | [rastogiruchir/alphagenome-pytorch](https://github.com/rastogiruchir/alphagenome-pytorch) |
 | AlphaGenome | weights, fold 0 | [gtca/alphagenome_pytorch](https://huggingface.co/gtca/alphagenome_pytorch), Google DeepMind's weights |
 | DeepLIFT/SHAP | tangermeme 1.0.4 | [jmschrei/tangermeme](https://github.com/jmschrei/tangermeme) |

@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 CONDA=$(command -v mamba || command -v conda)
 
-for e in orchestration compute meme; do
+for e in orchestration compute meme chrombpnet; do
     [ -x .envs/$e/bin/python ] || $CONDA env create -q -y -p "$PWD/.envs/$e" -f envs/$e.yaml
 done
 # the AlphaGenome model code is pinned here; its dependencies are pinned in envs/compute.yaml
